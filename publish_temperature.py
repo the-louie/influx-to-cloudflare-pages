@@ -21,7 +21,7 @@ load_dotenv()
 
 REQUIRED_VARS = [
     "INFLUXDB_URL", "INFLUXDB_TOKEN", "INFLUXDB_ORG", "INFLUXDB_BUCKET",
-    "MEASUREMENT", "FIELD", "DEVICE_ID", "HOST_FILTER",
+    "MEASUREMENT", "FIELD", "DEVICE_ID",
     "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_PROJECT_NAME",
 ]
 missing = [v for v in REQUIRED_VARS if v not in os.environ]
@@ -53,7 +53,6 @@ INFLUXDB_BUCKET = os.environ["INFLUXDB_BUCKET"]
 MEASUREMENT = os.environ["MEASUREMENT"]
 FIELD = os.environ["FIELD"]
 DEVICE_ID = os.environ["DEVICE_ID"]
-HOST_FILTER = os.environ["HOST_FILTER"]
 
 # Cloudflare Pages
 CLOUDFLARE_PROJECT_NAME = os.environ["CLOUDFLARE_PROJECT_NAME"]
@@ -81,7 +80,7 @@ def fetch_temperature():
         raise ValueError(f"Invalid bucket name: {INFLUXDB_BUCKET}")
 
     for name, val in [("MEASUREMENT", MEASUREMENT), ("FIELD", FIELD),
-                      ("DEVICE_ID", DEVICE_ID), ("HOST_FILTER", HOST_FILTER)]:
+                      ("DEVICE_ID", DEVICE_ID)]:
         _validate_flux_value(name, val)
 
     query = f"""
@@ -90,7 +89,6 @@ from(bucket: "{INFLUXDB_BUCKET}")
   |> filter(fn: (r) => r["_measurement"] == "{MEASUREMENT}")
   |> filter(fn: (r) => r["_field"] == "{FIELD}")
   |> filter(fn: (r) => r["device_id"] == "{DEVICE_ID}")
-  |> filter(fn: (r) => r["host"] == "{HOST_FILTER}")
   |> last()
 """
     client = InfluxDBClient(url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG, timeout=TIMEOUT_SECONDS * 1000)

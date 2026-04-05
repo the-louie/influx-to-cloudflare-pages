@@ -23,7 +23,6 @@ REQUIRED_ENV = {
     "MEASUREMENT": "http_listener_v2",
     "FIELD": "temperature",
     "DEVICE_ID": "gisebo-01",
-    "HOST_FILTER": "61781446e5e9",
     "CLOUDFLARE_API_TOKEN": "test-cf-token",
     "CLOUDFLARE_ACCOUNT_ID": "test-cf-account",
     "CLOUDFLARE_PROJECT_NAME": "temperature",
@@ -83,7 +82,6 @@ class TestFluxQueryValidation:
         assert "http_listener_v2" in query
         assert "temperature" in query
         assert "gisebo-01" in query
-        assert "61781446e5e9" in query
 
     def test_injection_in_device_id_is_rejected(self, monkeypatch):
         monkeypatch.setenv("DEVICE_ID", '") |> drop(')
