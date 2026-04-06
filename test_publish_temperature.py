@@ -83,6 +83,25 @@ class TestFluxQueryValidation:
         assert "temperature" in query
         assert "gisebo-01" in query
 
+    def test_flux_query_has_no_host_filter(self, monkeypatch):
+        # T-021a regression guard. The host filter was removed because the
+        # value was a Docker container ID, which Docker reassigns on every
+        # container recreation. A churning ID inside a stable filter caused
+        # silent zero-row results. The device_id filter is already a unique
+        # sensor identifier, so the host filter added no selectivity.
+        mod = _import_fresh()
+        mock_query_api = MagicMock()
+        mock_query_api.query.return_value = []
+        mock_client = MagicMock()
+        mock_client.query_api.return_value = mock_query_api
+        monkeypatch.setattr(mod, "InfluxDBClient", lambda **kw: mock_client)
+
+        mod.fetch_temperature()
+
+        query = mock_query_api.query.call_args[0][0]
+        assert 'r["host"]' not in query
+        assert "61781446e5e9" not in query
+
     def test_injection_in_device_id_is_rejected(self, monkeypatch):
         monkeypatch.setenv("DEVICE_ID", '") |> drop(')
         mod = _import_fresh()
