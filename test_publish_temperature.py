@@ -102,6 +102,16 @@ class TestFluxQueryValidation:
         assert 'r["host"]' not in query
         assert "61781446e5e9" not in query
 
+    def test_host_filter_env_var_is_ignored_silently(self, monkeypatch):
+        # T-021a backward-compat guard. Operators who still have HOST_FILTER
+        # in their .env should NOT see an error, the variable should be
+        # ignored. If a future change re-adds "HOST_FILTER" to REQUIRED_VARS,
+        # this test will fail and flag the regression.
+        monkeypatch.setenv("HOST_FILTER", "leftover-from-old-env-file")
+        mod = _import_fresh()
+        assert "HOST_FILTER" not in mod.REQUIRED_VARS
+        assert not hasattr(mod, "HOST_FILTER")
+
     def test_injection_in_device_id_is_rejected(self, monkeypatch):
         monkeypatch.setenv("DEVICE_ID", '") |> drop(')
         mod = _import_fresh()
