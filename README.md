@@ -66,7 +66,6 @@ All configuration lives in a `.env` file (not committed to git). Copy `.env.exam
 | `MEASUREMENT` | Yes | InfluxDB measurement (e.g. `http_listener_v2`) |
 | `FIELD` | Yes | Field key (e.g. `temperature`) |
 | `DEVICE_ID` | Yes | Device identifier tag (e.g. `gisebo-01`) |
-| `HOST_FILTER` | Yes | InfluxDB host tag value |
 | `CLOUDFLARE_API_TOKEN` | Yes | Cloudflare API token with Pages edit permission |
 | `CLOUDFLARE_ACCOUNT_ID` | Yes | Cloudflare account identifier |
 | `CLOUDFLARE_PROJECT_NAME` | Yes | Cloudflare Pages project name |
