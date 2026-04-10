@@ -84,13 +84,6 @@ The tag value that identifies your specific sensor device.
 - Example: `gisebo-01`
 - To find yours: in **Data Explorer**, filter on the `device_id` tag to see available devices
 
-### `HOST_FILTER`
-
-The InfluxDB `host` tag value, typically the container ID or hostname of the service writing data to InfluxDB.
-
-- Example: `61781446e5e9`
-- To find yours: in **Data Explorer**, browse the `host` tag values after selecting your measurement
-
 ---
 
 ## 3. Cloudflare Pages
