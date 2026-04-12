@@ -14,7 +14,6 @@ Fetch a temperature data point from InfluxDB (backing a Grafana dashboard) and p
 - Measurement: `http_listener_v2`
 - Field: `temperature`
 - Device: `gisebo-01`
-- Host filter: `61781446e5e9`
 - Query fetches the last (most recent) value
 
 ## Flux Query
@@ -24,7 +23,6 @@ from(bucket: "home_assistant")
   |> filter(fn: (r) => r["_measurement"] == params.measurement)
   |> filter(fn: (r) => r["_field"] == params.field)
   |> filter(fn: (r) => r["device_id"] == params.device_id)
-  |> filter(fn: (r) => r["host"] == params.host_filter)
   |> last()
 ```
 
