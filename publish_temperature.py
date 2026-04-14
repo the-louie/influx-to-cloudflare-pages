@@ -43,6 +43,39 @@ def _parse_int_env(name, default):
         sys.exit(1)
 
 
+# Flux duration literal: a leading minus, one or more digits, then a unit
+# character (s seconds, m minutes, h hours, d days, w weeks). Examples that
+# pass: -30d, -12h, -7d, -1w. Examples that fail: 30d (no minus), -30 (no
+# unit), -30y (unsupported unit), abc (not a duration at all).
+_DURATION_PATTERN = re.compile(r"^-\d+[smhdw]$")
+
+
+def _parse_duration_env(name, default):
+    """Read a Flux duration env var, validate format, exit cleanly on failure.
+
+    Sibling of _parse_int_env. Used by QUERY_RANGE so the value can be
+    interpolated directly into the Flux query string without quoting,
+    since Flux durations are bare literals (range(start: -30d)) not
+    strings.
+
+    Direct f-string interpolation is safe here because the regex
+    allowlist below permits only one minus sign, ASCII digits, and a
+    single unit character. None of those characters can break out of
+    the Flux duration grammar, so there is no escape vector even
+    though the value originates in an operator-controlled .env file.
+    """
+    raw = os.environ.get(name, default)
+    if not _DURATION_PATTERN.match(raw):
+        print(
+            f"Invalid duration for {name}: {raw!r}. "
+            f"Expected format like -30d, -12h, -7d, -1w (leading minus, "
+            f"digits, unit s/m/h/d/w).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return raw
+
+
 # InfluxDB config
 INFLUXDB_URL = os.environ["INFLUXDB_URL"]
 INFLUXDB_TOKEN = os.environ["INFLUXDB_TOKEN"]
