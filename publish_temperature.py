@@ -95,6 +95,11 @@ TIMEOUT_SECONDS = _parse_int_env("TIMEOUT_SECONDS", "30")
 DEPLOY_TIMEOUT_SECONDS = _parse_int_env("DEPLOY_TIMEOUT_SECONDS", "120")
 TEMP_MIN = _parse_int_env("TEMP_MIN", "-50")
 TEMP_MAX = _parse_int_env("TEMP_MAX", "80")
+# How far back to scan in the bucket. Keeps query time bounded as the
+# bucket grows. Default of -30d is generous for sensors that report every
+# few minutes. Operators with sparser sensors (e.g. one reading per week)
+# may need to widen this to -90d or more.
+QUERY_RANGE = _parse_duration_env("QUERY_RANGE", "-30d")
 
 SITE_DIR = Path(__file__).parent / "site"
 if not SITE_DIR.is_dir():
@@ -118,7 +123,7 @@ def fetch_temperature():
 
     query = f"""
 from(bucket: "{INFLUXDB_BUCKET}")
-  |> range(start: 0)
+  |> range(start: {QUERY_RANGE})
   |> filter(fn: (r) => r["_measurement"] == "{MEASUREMENT}")
   |> filter(fn: (r) => r["_field"] == "{FIELD}")
   |> filter(fn: (r) => r["device_id"] == "{DEVICE_ID}")
