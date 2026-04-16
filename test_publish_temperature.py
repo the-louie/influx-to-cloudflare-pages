@@ -610,6 +610,74 @@ class TestEnvVarParsing:
 
 
 # ---------------------------------------------------------------------------
+# T-020a: QUERY_RANGE config and Flux duration validation
+# ---------------------------------------------------------------------------
+
+class TestQueryRange:
+    """T-020a: Verify QUERY_RANGE bounds the Flux query window."""
+
+    def test_query_range_default_is_30d(self, monkeypatch):
+        # No QUERY_RANGE in env, default -30d should land in the query.
+        # Critically, the old range(start: 0) full-bucket scan must be gone.
+        monkeypatch.delenv("QUERY_RANGE", raising=False)
+        mod = _import_fresh()
+
+        mock_query_api = MagicMock()
+        mock_query_api.query.return_value = []
+        mock_client = MagicMock()
+        mock_client.query_api.return_value = mock_query_api
+        monkeypatch.setattr(mod, "InfluxDBClient", lambda **kw: mock_client)
+
+        mod.fetch_temperature()
+        query = mock_query_api.query.call_args[0][0]
+        assert "range(start: -30d)" in query
+        assert "range(start: 0)" not in query
+
+    def test_query_range_overrides_via_env(self, monkeypatch):
+        # Operator override should flow straight into the query.
+        monkeypatch.setenv("QUERY_RANGE", "-7d")
+        mod = _import_fresh()
+
+        mock_query_api = MagicMock()
+        mock_query_api.query.return_value = []
+        mock_client = MagicMock()
+        mock_client.query_api.return_value = mock_query_api
+        monkeypatch.setattr(mod, "InfluxDBClient", lambda **kw: mock_client)
+
+        mod.fetch_temperature()
+        query = mock_query_api.query.call_args[0][0]
+        assert "range(start: -7d)" in query
+
+    def test_invalid_query_range_exits(self, monkeypatch, capsys):
+        # Garbage value must fail loudly at import time, not silently
+        # produce a broken Flux query at fetch time.
+        monkeypatch.setenv("QUERY_RANGE", "garbage")
+        monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **kw: None)
+
+        with pytest.raises(SystemExit) as exc_info:
+            _import_fresh()
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "QUERY_RANGE" in captured.err
+
+    def test_query_range_rejects_missing_minus(self, monkeypatch):
+        # Common mistake: forgetting the leading minus, which would mean
+        # "30 days from now" in Flux, not "the last 30 days".
+        monkeypatch.setenv("QUERY_RANGE", "30d")
+        monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **kw: None)
+        with pytest.raises(SystemExit):
+            _import_fresh()
+
+    def test_query_range_rejects_unsupported_unit(self, monkeypatch):
+        # Flux supports s/m/h/d/w. Years (y) and months (mo) need extra
+        # logic to compute and are out of scope for this knob.
+        monkeypatch.setenv("QUERY_RANGE", "-1y")
+        monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **kw: None)
+        with pytest.raises(SystemExit):
+            _import_fresh()
+
+
+# ---------------------------------------------------------------------------
 # T-014: SITE_DIR validation
 # ---------------------------------------------------------------------------
 
