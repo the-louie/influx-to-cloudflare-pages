@@ -149,3 +149,12 @@ Sanity-check bounds for temperature values. If a reading falls outside this rang
 
 - Defaults: `-50` and `80`
 - Adjust if your sensor operates in extreme environments
+
+### `QUERY_RANGE`
+
+How far back the Flux query scans the InfluxDB bucket. Bounds the query window so latency stays predictable as the bucket grows. Format is a Flux duration literal: a leading minus, one or more digits, then a unit character (`s` seconds, `m` minutes, `h` hours, `d` days, `w` weeks).
+
+- Default: `-30d`
+- Examples: `-12h`, `-7d`, `-1w`
+- The default is generous for sensors that report every few minutes. Operators with sparser sensors (one reading per week or less) may need to widen this to `-90d` or more, otherwise the query will return no rows and the script will exit with "No data returned from InfluxDB"
+- Invalid values cause the script to exit at startup with a clear error naming the variable, no silent fallback
