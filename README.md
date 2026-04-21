@@ -71,6 +71,7 @@ All configuration lives in a `.env` file (not committed to git). Copy `.env.exam
 | `CLOUDFLARE_PROJECT_NAME` | Yes | Cloudflare Pages project name |
 | `TIMEOUT_SECONDS` | No | InfluxDB query timeout in seconds (default: 30) |
 | `DEPLOY_TIMEOUT_SECONDS` | No | Wrangler deploy timeout in seconds (default: 120) |
+| `QUERY_RANGE` | No | Flux duration window for the bucket scan (default: `-30d`) |
 | `TEMP_MIN` | No | Low bound for sanity check (default: -50) |
 | `TEMP_MAX` | No | High bound for sanity check (default: 80) |
 
