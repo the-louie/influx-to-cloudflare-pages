@@ -113,6 +113,28 @@ def _validate_flux_value(name, value):
         raise ValueError(f"Invalid character in {name}: {value!r}")
 
 
+def _validate_last_value(value):
+    """Sanity-check the most-recent reading.
+
+    Returns the value if usable, or None if it should be discarded.
+    A warning is logged for out-of-range values, but they are still
+    returned (the operator can adjust TEMP_MIN/TEMP_MAX if their
+    sensor genuinely sees those readings).
+    """
+    if value is None:
+        logging.warning("InfluxDB returned None value")
+        return None
+    if not isinstance(value, (int, float)):
+        logging.warning(f"InfluxDB returned non-numeric value: {value!r}")
+        return None
+    if not math.isfinite(value):
+        logging.warning(f"InfluxDB returned non-finite value: {value}")
+        return None
+    if not (TEMP_MIN <= value <= TEMP_MAX):
+        logging.warning(f"Temperature {value} outside expected range [{TEMP_MIN}, {TEMP_MAX}]")
+    return value
+
+
 def fetch_temperature():
     if not re.match(r"^[a-zA-Z0-9_-]+$", INFLUXDB_BUCKET):
         raise ValueError(f"Invalid bucket name: {INFLUXDB_BUCKET}")
@@ -134,20 +156,11 @@ from(bucket: "{INFLUXDB_BUCKET}")
         tables = client.query_api().query(query)
         for table in tables:
             for record in table.records:
-                value = record.get_value()
-                if value is None:
-                    logging.warning("InfluxDB returned None value")
+                validated = _validate_last_value(record.get_value())
+                if validated is None:
                     return None
-                if not isinstance(value, (int, float)):
-                    logging.warning(f"InfluxDB returned non-numeric value: {value!r}")
-                    return None
-                if not math.isfinite(value):
-                    logging.warning(f"InfluxDB returned non-finite value: {value}")
-                    return None
-                if not (TEMP_MIN <= value <= TEMP_MAX):
-                    logging.warning(f"Temperature {value} outside expected range [{TEMP_MIN}, {TEMP_MAX}]")
                 return {
-                    "temperature": value,
+                    "temperature": validated,
                     "time": record.get_time().isoformat(),
                     "device_id": DEVICE_ID,
                     "updated_at": datetime.now(timezone.utc).isoformat(),
