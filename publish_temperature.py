@@ -113,6 +113,40 @@ def _validate_flux_value(name, value):
         raise ValueError(f"Invalid character in {name}: {value!r}")
 
 
+def _table_yield_name(table):
+    """Return the Flux yield name (set via |> yield(name: ...)) for a table.
+
+    The yield name lives in the table's group key under the column
+    'result'. Different client versions expose this slightly
+    differently, so we check several access paths and fall back to
+    inspecting the first record's values dict. Returns an empty
+    string if no name is available, in which case the caller treats
+    the table as the default 'last' yield.
+
+    Strict isinstance(str) check: anything non-string (None, mock
+    objects in tests, unexpected client return shapes) falls through
+    to the next path or to the empty-string default. This prevents
+    silent miscategorisation of tables.
+    """
+    try:
+        group_key = table.get_group_key()
+        if hasattr(group_key, "get") and callable(group_key.get):
+            name = group_key.get("result")
+            if isinstance(name, str) and name:
+                return name
+    except Exception:
+        pass
+    for record in table.records:
+        try:
+            name = record.values.get("result", "")
+            if isinstance(name, str):
+                return name
+            return ""
+        except Exception:
+            return ""
+    return ""
+
+
 def _validate_last_value(value):
     """Sanity-check the most-recent reading.
 
