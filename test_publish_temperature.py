@@ -257,13 +257,19 @@ class TestTemperatureValidation:
     """T-005a: Verify invalid temperature values are rejected."""
 
     def _make_mock_client(self, value, monkeypatch):
+        # T-022a: the production query now uses multi-yield Flux. Each
+        # table carries a "result" column equal to the yield name. For
+        # backward-compat with single-value tests, this helper returns
+        # one table tagged as the "last" yield.
         mod = _import_fresh()
         mock_record = MagicMock()
         mock_record.get_value.return_value = value
         mock_record.get_time.return_value = datetime(2026, 5, 2, tzinfo=timezone.utc)
+        mock_record.values = {"result": "last"}
 
         mock_table = MagicMock()
         mock_table.records = [mock_record]
+        mock_table.get_group_key.return_value = {"result": "last"}
 
         mock_query_api = MagicMock()
         mock_query_api.query.return_value = [mock_table]
@@ -321,8 +327,10 @@ class TestStructuredLogging:
         mock_record = MagicMock()
         mock_record.get_value.return_value = 22.5
         mock_record.get_time.return_value = datetime(2026, 5, 2, tzinfo=timezone.utc)
+        mock_record.values = {"result": "last"}  # T-022a: tag as last yield
         mock_table = MagicMock()
         mock_table.records = [mock_record]
+        mock_table.get_group_key.return_value = {"result": "last"}
         mock_query_api = MagicMock()
         mock_query_api.query.return_value = [mock_table]
         mock_client = MagicMock()
@@ -538,8 +546,10 @@ class TestExceptionHandling:
         mock_record = MagicMock()
         mock_record.get_value.return_value = 22.5
         mock_record.get_time.return_value = datetime(2026, 5, 2, tzinfo=timezone.utc)
+        mock_record.values = {"result": "last"}  # T-022a: tag as last yield
         mock_table = MagicMock()
         mock_table.records = [mock_record]
+        mock_table.get_group_key.return_value = {"result": "last"}
         mock_query_api = MagicMock()
         mock_query_api.query.return_value = [mock_table]
         mock_client = MagicMock()

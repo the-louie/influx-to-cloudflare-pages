@@ -177,32 +177,73 @@ def fetch_temperature():
                       ("DEVICE_ID", DEVICE_ID)]:
         _validate_flux_value(name, val)
 
+    # Multi-yield query. The 'data =' alias defines the filtered
+    # series once, then three yields aggregate it differently and
+    # return three separate tables. The 36h window for min/max is
+    # intentionally hardcoded and independent of QUERY_RANGE, since
+    # QUERY_RANGE only bounds how far back to look for the latest
+    # reading and 36h is the user-facing recency window for the
+    # min/max display.
     query = f"""
-from(bucket: "{INFLUXDB_BUCKET}")
+data = from(bucket: "{INFLUXDB_BUCKET}")
   |> range(start: {QUERY_RANGE})
   |> filter(fn: (r) => r["_measurement"] == "{MEASUREMENT}")
   |> filter(fn: (r) => r["_field"] == "{FIELD}")
   |> filter(fn: (r) => r["device_id"] == "{DEVICE_ID}")
+
+data
   |> last()
+  |> yield(name: "last")
+
+data
+  |> range(start: -36h)
+  |> min()
+  |> yield(name: "min_36h")
+
+data
+  |> range(start: -36h)
+  |> max()
+  |> yield(name: "max_36h")
 """
     client = InfluxDBClient(url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG, timeout=TIMEOUT_SECONDS * 1000)
     try:
         tables = client.query_api().query(query)
+
+        last_value = None
+        last_time = None
+        min_36h = None
+        max_36h = None
+
         for table in tables:
+            yield_name = _table_yield_name(table)
             for record in table.records:
-                validated = _validate_last_value(record.get_value())
-                if validated is None:
-                    return None
-                return {
-                    "temperature": validated,
-                    "time": record.get_time().isoformat(),
-                    "device_id": DEVICE_ID,
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                }
+                value = record.get_value()
+                if yield_name == "last" or (yield_name == "" and last_value is None):
+                    validated = _validate_last_value(value)
+                    if validated is None:
+                        return None
+                    last_value = validated
+                    last_time = record.get_time()
+                elif yield_name == "min_36h":
+                    if isinstance(value, (int, float)) and math.isfinite(value):
+                        min_36h = value
+                elif yield_name == "max_36h":
+                    if isinstance(value, (int, float)) and math.isfinite(value):
+                        max_36h = value
+
+        if last_value is None or last_time is None:
+            return None
+
+        return {
+            "temperature": last_value,
+            "time": last_time.isoformat(),
+            "device_id": DEVICE_ID,
+            "min_36h": min_36h,
+            "max_36h": max_36h,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
     finally:
         client.close()
-
-    return None
 
 
 def generate_og_image(data):
