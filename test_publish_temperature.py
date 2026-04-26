@@ -312,6 +312,121 @@ class TestTemperatureValidation:
 
 
 # ---------------------------------------------------------------------------
+# T-022a: 36h min/max aggregation
+# ---------------------------------------------------------------------------
+
+class TestMinMax36h:
+    """T-022a: Verify the multi-yield Flux query populates min_36h and max_36h."""
+
+    def _make_table(self, value, yield_name):
+        # Build a mock FluxTable that looks enough like the real client's
+        # output for fetch_temperature() to dispatch on its yield name.
+        # The 'result' column holds the yield name, both on the group
+        # key (preferred path) and on the record.values fallback.
+        record = MagicMock()
+        record.get_value.return_value = value
+        record.get_time.return_value = datetime(2026, 5, 2, tzinfo=timezone.utc)
+        record.values = {"result": yield_name}
+        table = MagicMock()
+        table.records = [record]
+        table.get_group_key.return_value = {"result": yield_name}
+        return table
+
+    def _wire(self, monkeypatch, tables):
+        mod = _import_fresh()
+        api = MagicMock()
+        api.query.return_value = tables
+        client = MagicMock()
+        client.query_api.return_value = api
+        monkeypatch.setattr(mod, "InfluxDBClient", lambda **kw: client)
+        return mod
+
+    def test_three_yields_populate_all_fields(self, monkeypatch):
+        # Happy path: three tables, one per yield, each with a real value.
+        tables = [
+            self._make_table(22.5, "last"),
+            self._make_table(18.0, "min_36h"),
+            self._make_table(27.3, "max_36h"),
+        ]
+        mod = self._wire(monkeypatch, tables)
+        result = mod.fetch_temperature()
+        assert result is not None
+        assert result["temperature"] == 22.5
+        assert result["min_36h"] == 18.0
+        assert result["max_36h"] == 27.3
+
+    def test_missing_min_max_yields_become_none(self, monkeypatch):
+        # Sensor offline for >36h: the min/max yields return empty
+        # tables, but a "last" record still exists from earlier. The
+        # function must still return the latest reading and surface
+        # None for the absent aggregates rather than crashing.
+        empty_table = MagicMock()
+        empty_table.records = []
+        empty_table.get_group_key.return_value = {"result": "min_36h"}
+        empty_max = MagicMock()
+        empty_max.records = []
+        empty_max.get_group_key.return_value = {"result": "max_36h"}
+
+        tables = [
+            self._make_table(22.5, "last"),
+            empty_table,
+            empty_max,
+        ]
+        mod = self._wire(monkeypatch, tables)
+        result = mod.fetch_temperature()
+        assert result is not None
+        assert result["temperature"] == 22.5
+        assert result["min_36h"] is None
+        assert result["max_36h"] is None
+
+    def test_min_max_skip_temp_min_max_sanity_check(self, monkeypatch):
+        # The TEMP_MIN/TEMP_MAX bounds apply only to the latest reading,
+        # not to the 36h aggregates. A min of -100 (below TEMP_MIN of
+        # -50) should still flow through, since aggregates are summary
+        # statistics, not new readings to validate.
+        tables = [
+            self._make_table(22.5, "last"),
+            self._make_table(-100.0, "min_36h"),
+            self._make_table(200.0, "max_36h"),
+        ]
+        mod = self._wire(monkeypatch, tables)
+        result = mod.fetch_temperature()
+        assert result is not None
+        assert result["min_36h"] == -100.0
+        assert result["max_36h"] == 200.0
+
+    def test_query_uses_36h_window_for_aggregates(self, monkeypatch):
+        # Regression guard: the min/max yields must scope their range
+        # to -36h, independent of QUERY_RANGE which only bounds the
+        # outer scan. If someone refactors the query and accidentally
+        # drops the inner range(start: -36h), this test will catch it.
+        mod = _import_fresh()
+        api = MagicMock()
+        api.query.return_value = [self._make_table(22.5, "last")]
+        client = MagicMock()
+        client.query_api.return_value = api
+        monkeypatch.setattr(mod, "InfluxDBClient", lambda **kw: client)
+
+        mod.fetch_temperature()
+        query = api.query.call_args[0][0]
+        assert "range(start: -36h)" in query
+        assert 'yield(name: "min_36h")' in query
+        assert 'yield(name: "max_36h")' in query
+
+    def test_completely_missing_aggregate_tables_become_none(self, monkeypatch):
+        # In real Flux, an empty min()/max() yield can return zero
+        # tables (the entire table for that yield is absent), not a
+        # table with zero records. The previous test covered the
+        # zero-records shape. This test covers the zero-tables shape.
+        mod = self._wire(monkeypatch, [self._make_table(22.5, "last")])
+        result = mod.fetch_temperature()
+        assert result is not None
+        assert result["temperature"] == 22.5
+        assert result["min_36h"] is None
+        assert result["max_36h"] is None
+
+
+# ---------------------------------------------------------------------------
 # T-005b: Structured logging
 # ---------------------------------------------------------------------------
 
