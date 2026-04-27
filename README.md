@@ -138,7 +138,7 @@ Secrets are never baked into the image. They are read from `.env` at runtime via
 ├── site/
 │   ├── index.html               # Static temperature display page
 │   └── _headers                 # Cloudflare Pages security headers
-├── test_publish_temperature.py  # Test suite (46 tests)
+├── test_publish_temperature.py  # Test suite (51 tests)
 ├── requirements.txt             # Pinned Python dependencies
 ├── Dockerfile                   # Container image definition
 ├── docker-compose.yml           # Docker Compose service config
@@ -170,7 +170,7 @@ Currently only one data point is published. The structure is designed to support
 python -m pytest test_publish_temperature.py -v
 ```
 
-The test suite has 46 tests covering InfluxDB query validation, timeout propagation, environment variable parsing, temperature value validation, structured logging, Cloudflare deploy, and error handling.
+The test suite has 51 tests covering InfluxDB query validation, timeout propagation, environment variable parsing, temperature value validation, structured logging, Cloudflare deploy, error handling, and 36h min/max aggregation.
 
 ## Development
 
