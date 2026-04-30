@@ -98,15 +98,27 @@
             }
         }
 
+        function formatAggregate(value) {
+            // Render null/undefined as the placeholder dash. Anything
+            // numeric is shown as-is. Defensive against stringy values
+            // sneaking in from a future schema change.
+            if (value === null || value === undefined) return '--';
+            return value;
+        }
+
         function updateDisplay(data) {
             document.getElementById('device-id').textContent = data.device_id || '';
             document.getElementById('temperature').textContent = data.temperature;
+            document.getElementById('min-36h').textContent = formatAggregate(data.min_36h);
+            document.getElementById('max-36h').textContent = formatAggregate(data.max_36h);
             document.getElementById('updated-at').textContent = 'Last updated: ' + formatTimestamp(data.time);
             document.title = data.temperature + '\u00B0C';
         }
 
         function showError() {
             document.getElementById('temperature').textContent = '--';
+            document.getElementById('min-36h').textContent = '--';
+            document.getElementById('max-36h').textContent = '--';
             document.getElementById('updated-at').textContent = '...';
             document.title = 'Temperature';
         }
