@@ -43,6 +43,27 @@ def _parse_int_env(name, default):
         sys.exit(1)
 
 
+def _pretty_device_name(device_id):
+    """Convert a machine identifier into a display-friendly form.
+
+    Replaces '-' and '_' with spaces and upper-cases the first
+    character. Casing of the rest of the string is preserved (so
+    'Foo-Bar' becomes 'Foo Bar', not 'Foo bar'). Empty input yields
+    empty output.
+
+    Examples:
+        gisebo-01            -> Gisebo 01
+        living_room          -> Living room
+        temp-sensor_kitchen  -> Temp sensor kitchen
+        Foo-Bar              -> Foo Bar
+        a                    -> A
+    """
+    if not device_id:
+        return ""
+    cleaned = device_id.replace("-", " ").replace("_", " ")
+    return cleaned[0].upper() + cleaned[1:]
+
+
 # Flux duration literal: a leading minus, one or more digits, then a unit
 # character (s seconds, m minutes, h hours, d days, w weeks). Examples that
 # pass: -30d, -12h, -7d, -1w. Examples that fail: 30d (no minus), -30 (no
