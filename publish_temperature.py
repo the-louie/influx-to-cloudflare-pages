@@ -3,6 +3,7 @@
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -46,18 +47,27 @@ REMOTE_PATH = os.environ["REMOTE_PATH"]
 
 
 def fetch_temperature():
+    if not re.match(r"^[a-zA-Z0-9_-]+$", INFLUXDB_BUCKET):
+        raise ValueError(f"Invalid bucket name: {INFLUXDB_BUCKET}")
+
     query = f"""
 from(bucket: "{INFLUXDB_BUCKET}")
   |> range(start: -5m)
-  |> filter(fn: (r) => r["_measurement"] == "{MEASUREMENT}")
-  |> filter(fn: (r) => r["_field"] == "{FIELD}")
-  |> filter(fn: (r) => r["device_id"] == "{DEVICE_ID}")
-  |> filter(fn: (r) => r["host"] == "{HOST_FILTER}")
+  |> filter(fn: (r) => r["_measurement"] == params.measurement)
+  |> filter(fn: (r) => r["_field"] == params.field)
+  |> filter(fn: (r) => r["device_id"] == params.device_id)
+  |> filter(fn: (r) => r["host"] == params.host_filter)
   |> last()
 """
+    params = {
+        "measurement": MEASUREMENT,
+        "field": FIELD,
+        "device_id": DEVICE_ID,
+        "host_filter": HOST_FILTER,
+    }
     client = InfluxDBClient(url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG)
     try:
-        tables = client.query_api().query(query)
+        tables = client.query_api().query(query, params=params)
         for table in tables:
             for record in table.records:
                 return {
