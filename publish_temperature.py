@@ -45,6 +45,8 @@ REMOTE_USER = os.environ["REMOTE_USER"]
 REMOTE_HOST = os.environ["REMOTE_HOST"]
 REMOTE_PATH = os.environ["REMOTE_PATH"]
 
+TIMEOUT_SECONDS = int(os.environ.get("TIMEOUT_SECONDS", "30"))
+
 
 def fetch_temperature():
     if not re.match(r"^[a-zA-Z0-9_-]+$", INFLUXDB_BUCKET):
@@ -65,7 +67,7 @@ from(bucket: "{INFLUXDB_BUCKET}")
         "device_id": DEVICE_ID,
         "host_filter": HOST_FILTER,
     }
-    client = InfluxDBClient(url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG)
+    client = InfluxDBClient(url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG, timeout=TIMEOUT_SECONDS * 1000)
     try:
         tables = client.query_api().query(query, params=params)
         for table in tables:
@@ -97,11 +99,13 @@ def publish(data):
         subprocess.run(
             ["scp", "-q", local_tmp, f"{remote_dest}:{remote_tmp}"],
             check=True,
+            timeout=TIMEOUT_SECONDS,
         )
         # Atomic move on the remote host
         subprocess.run(
             ["ssh", remote_dest, "mv", remote_tmp, REMOTE_PATH],
             check=True,
+            timeout=TIMEOUT_SECONDS,
         )
     finally:
         os.unlink(local_tmp)
