@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
-"""Fetch latest temperature from InfluxDB and publish to remote static site."""
+"""Fetch latest temperature from InfluxDB and publish to Cloudflare Pages."""
 
 import json
 import logging
 import math
 import os
 import re
-import shlex
 import subprocess
 import sys
-import tempfile
 from datetime import datetime, timezone
+from pathlib import Path
 
 from dotenv import load_dotenv
 from influxdb_client import InfluxDBClient
@@ -20,7 +19,7 @@ load_dotenv()
 REQUIRED_VARS = [
     "INFLUXDB_URL", "INFLUXDB_TOKEN", "INFLUXDB_ORG", "INFLUXDB_BUCKET",
     "MEASUREMENT", "FIELD", "DEVICE_ID", "HOST_FILTER",
-    "REMOTE_USER", "REMOTE_HOST", "REMOTE_PATH",
+    "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_PROJECT_NAME",
 ]
 missing = [v for v in REQUIRED_VARS if v not in os.environ]
 if missing:
@@ -43,12 +42,12 @@ FIELD = os.environ["FIELD"]
 DEVICE_ID = os.environ["DEVICE_ID"]
 HOST_FILTER = os.environ["HOST_FILTER"]
 
-# Remote host
-REMOTE_USER = os.environ["REMOTE_USER"]
-REMOTE_HOST = os.environ["REMOTE_HOST"]
-REMOTE_PATH = os.environ["REMOTE_PATH"]
+# Cloudflare Pages
+CLOUDFLARE_PROJECT_NAME = os.environ["CLOUDFLARE_PROJECT_NAME"]
 
 TIMEOUT_SECONDS = int(os.environ.get("TIMEOUT_SECONDS", "30"))
+
+SITE_DIR = Path(__file__).parent / "site"
 
 
 def fetch_temperature():
@@ -102,38 +101,22 @@ from(bucket: "{INFLUXDB_BUCKET}")
 
 
 def publish(data):
-    remote_dest = f"{REMOTE_USER}@{REMOTE_HOST}"
-    remote_tmp = REMOTE_PATH + ".tmp"
-
-    # Write JSON to a local temp file
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+    # Write temperature.json into the site directory
+    json_path = SITE_DIR / "temperature.json"
+    with open(json_path, "w") as f:
         json.dump(data, f, indent=2)
         f.write("\n")
-        local_tmp = f.name
 
-    try:
-        # SCP to a temp file on the remote host
-        subprocess.run(
-            ["scp", "-q", local_tmp, f"{remote_dest}:{shlex.quote(remote_tmp)}"],
-            check=True,
-            timeout=TIMEOUT_SECONDS,
-        )
-        # Atomic move on the remote host
-        try:
-            subprocess.run(
-                ["ssh", remote_dest, f"mv {shlex.quote(remote_tmp)} {shlex.quote(REMOTE_PATH)}"],
-                check=True,
-                timeout=TIMEOUT_SECONDS,
-            )
-        except subprocess.CalledProcessError:
-            logging.warning(f"SSH mv failed, attempting cleanup of remote temp file: {remote_tmp}")
-            subprocess.run(
-                ["ssh", remote_dest, f"rm -f {shlex.quote(remote_tmp)}"],
-                timeout=TIMEOUT_SECONDS,
-            )
-            raise
-    finally:
-        os.unlink(local_tmp)
+    # Deploy the site directory to Cloudflare Pages via Wrangler
+    subprocess.run(
+        [
+            "npx", "wrangler", "pages", "deploy",
+            str(SITE_DIR),
+            "--project-name", CLOUDFLARE_PROJECT_NAME,
+        ],
+        check=True,
+        timeout=TIMEOUT_SECONDS,
+    )
 
 
 def main():
