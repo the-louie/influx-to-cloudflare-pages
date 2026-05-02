@@ -2,6 +2,7 @@
 """Fetch latest temperature from InfluxDB and publish to remote static site."""
 
 import json
+import math
 import os
 import re
 import shlex
@@ -73,8 +74,22 @@ from(bucket: "{INFLUXDB_BUCKET}")
         tables = client.query_api().query(query, params=params)
         for table in tables:
             for record in table.records:
+                value = record.get_value()
+                if value is None:
+                    print("InfluxDB returned None value", file=sys.stderr)
+                    return None
+                if not isinstance(value, (int, float)):
+                    print(f"InfluxDB returned non-numeric value: {value!r}", file=sys.stderr)
+                    return None
+                if not math.isfinite(value):
+                    print(f"InfluxDB returned non-finite value: {value}", file=sys.stderr)
+                    return None
+                temp_min = int(os.environ.get("TEMP_MIN", "-50"))
+                temp_max = int(os.environ.get("TEMP_MAX", "80"))
+                if not (temp_min <= value <= temp_max):
+                    print(f"Temperature {value} outside expected range [{temp_min}, {temp_max}]", file=sys.stderr)
                 return {
-                    "temperature": record.get_value(),
+                    "temperature": value,
                     "time": record.get_time().isoformat(),
                     "device_id": DEVICE_ID,
                     "updated_at": datetime.now(timezone.utc).isoformat(),
