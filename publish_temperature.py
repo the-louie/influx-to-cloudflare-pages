@@ -13,6 +13,20 @@ from influxdb_client import InfluxDBClient
 
 load_dotenv()
 
+REQUIRED_VARS = [
+    "INFLUXDB_URL", "INFLUXDB_TOKEN", "INFLUXDB_ORG", "INFLUXDB_BUCKET",
+    "MEASUREMENT", "FIELD", "DEVICE_ID", "HOST_FILTER",
+    "REMOTE_USER", "REMOTE_HOST", "REMOTE_PATH",
+]
+missing = [v for v in REQUIRED_VARS if v not in os.environ]
+if missing:
+    print(
+        f"Missing required environment variables: {', '.join(missing)}\n"
+        "Copy .env.example to .env and fill in all values.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
 # InfluxDB config
 INFLUXDB_URL = os.environ["INFLUXDB_URL"]
 INFLUXDB_TOKEN = os.environ["INFLUXDB_TOKEN"]
