@@ -4,6 +4,7 @@
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -97,13 +98,13 @@ def publish(data):
     try:
         # SCP to a temp file on the remote host
         subprocess.run(
-            ["scp", "-q", local_tmp, f"{remote_dest}:{remote_tmp}"],
+            ["scp", "-q", local_tmp, f"{remote_dest}:{shlex.quote(remote_tmp)}"],
             check=True,
             timeout=TIMEOUT_SECONDS,
         )
         # Atomic move on the remote host
         subprocess.run(
-            ["ssh", remote_dest, "mv", remote_tmp, REMOTE_PATH],
+            ["ssh", remote_dest, f"mv {shlex.quote(remote_tmp)} {shlex.quote(REMOTE_PATH)}"],
             check=True,
             timeout=TIMEOUT_SECONDS,
         )
