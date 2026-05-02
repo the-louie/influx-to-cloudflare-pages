@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Temperature</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: #90c0de;
+            font-family: Arial, Helvetica, sans-serif;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+
+        #device-id {
+            font-size: 20px;
+            color: rgba(255, 255, 255, 0.7);
+            margin-bottom: 0.25em;
+        }
+
+        .temperature-display {
+            display: flex;
+            align-items: baseline;
+        }
+
+        #temperature {
+            font-weight: bold;
+            font-size: clamp(120px, 25vw, 300px);
+            color: #1c7bb7;
+            line-height: 1;
+        }
+
+        .unit {
+            font-size: clamp(40px, 8vw, 80px);
+            color: #1c7bb7;
+            font-weight: bold;
+        }
+
+        #updated-at {
+            font-size: 16px;
+            color: rgba(255, 255, 255, 0.7);
+            margin-top: 0.5em;
+        }
+    </style>
+</head>
+<body>
+    <div id="device-id"></div>
+    <div class="temperature-display">
+        <span id="temperature">--</span><span class="unit">&deg;C</span>
+    </div>
+    <div id="updated-at"></div>
+
+    <script>
+        function formatTimestamp(isoString) {
+            try {
+                var date = new Date(isoString);
+                if (isNaN(date.getTime())) return isoString;
+                return date.toLocaleString();
+            } catch (e) {
+                return isoString;
+            }
+        }
+
+        function updateDisplay(data) {
+            document.getElementById('device-id').textContent = data.device_id || '';
+            document.getElementById('temperature').textContent = data.temperature;
+            document.getElementById('updated-at').textContent = 'Last updated: ' + formatTimestamp(data.updated_at);
+            document.title = data.temperature + '\u00B0C';
+        }
+
+        function showError() {
+            document.getElementById('temperature').textContent = '--';
+            document.getElementById('updated-at').textContent = '...';
+            document.title = 'Temperature';
+        }
+
+        function fetchTemperature() {
+            fetch('temperature.json')
+                .then(function (response) {
+                    if (!response.ok) throw new Error('HTTP ' + response.status);
+                    return response.json();
+                })
+                .then(function (data) {
+                    updateDisplay(data);
+                })
+                .catch(function () {
+                    showError();
+                });
+        }
+
+        fetchTemperature();
+        setInterval(fetchTemperature, 60000);
+    </script>
+</body>
+</html>
