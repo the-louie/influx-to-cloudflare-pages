@@ -2,6 +2,7 @@
 """Fetch latest temperature from InfluxDB and publish to remote static site."""
 
 import json
+import logging
 import math
 import os
 import re
@@ -76,18 +77,18 @@ from(bucket: "{INFLUXDB_BUCKET}")
             for record in table.records:
                 value = record.get_value()
                 if value is None:
-                    print("InfluxDB returned None value", file=sys.stderr)
+                    logging.warning("InfluxDB returned None value")
                     return None
                 if not isinstance(value, (int, float)):
-                    print(f"InfluxDB returned non-numeric value: {value!r}", file=sys.stderr)
+                    logging.warning(f"InfluxDB returned non-numeric value: {value!r}")
                     return None
                 if not math.isfinite(value):
-                    print(f"InfluxDB returned non-finite value: {value}", file=sys.stderr)
+                    logging.warning(f"InfluxDB returned non-finite value: {value}")
                     return None
                 temp_min = int(os.environ.get("TEMP_MIN", "-50"))
                 temp_max = int(os.environ.get("TEMP_MAX", "80"))
                 if not (temp_min <= value <= temp_max):
-                    print(f"Temperature {value} outside expected range [{temp_min}, {temp_max}]", file=sys.stderr)
+                    logging.warning(f"Temperature {value} outside expected range [{temp_min}, {temp_max}]")
                 return {
                     "temperature": value,
                     "time": record.get_time().isoformat(),
@@ -125,7 +126,7 @@ def publish(data):
                 timeout=TIMEOUT_SECONDS,
             )
         except subprocess.CalledProcessError:
-            print(f"SSH mv failed, attempting cleanup of remote temp file: {remote_tmp}", file=sys.stderr)
+            logging.warning(f"SSH mv failed, attempting cleanup of remote temp file: {remote_tmp}")
             subprocess.run(
                 ["ssh", remote_dest, f"rm -f {shlex.quote(remote_tmp)}"],
                 timeout=TIMEOUT_SECONDS,
@@ -136,13 +137,14 @@ def publish(data):
 
 
 def main():
+    logging.basicConfig(format="%(asctime)s %(levelname)s %(message)s", level=logging.INFO)
     data = fetch_temperature()
     if data is None:
-        print("No data returned from InfluxDB", file=sys.stderr)
+        logging.error("No data returned from InfluxDB")
         sys.exit(1)
 
     publish(data)
-    print(f"Published: {data['temperature']}°C at {data['time']}")
+    logging.info(f"Published: {data['temperature']}°C at {data['time']}")
 
 
 if __name__ == "__main__":
