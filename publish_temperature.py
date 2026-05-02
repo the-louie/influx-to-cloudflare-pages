@@ -103,11 +103,19 @@ def publish(data):
             timeout=TIMEOUT_SECONDS,
         )
         # Atomic move on the remote host
-        subprocess.run(
-            ["ssh", remote_dest, f"mv {shlex.quote(remote_tmp)} {shlex.quote(REMOTE_PATH)}"],
-            check=True,
-            timeout=TIMEOUT_SECONDS,
-        )
+        try:
+            subprocess.run(
+                ["ssh", remote_dest, f"mv {shlex.quote(remote_tmp)} {shlex.quote(REMOTE_PATH)}"],
+                check=True,
+                timeout=TIMEOUT_SECONDS,
+            )
+        except subprocess.CalledProcessError:
+            print(f"SSH mv failed, attempting cleanup of remote temp file: {remote_tmp}", file=sys.stderr)
+            subprocess.run(
+                ["ssh", remote_dest, f"rm -f {shlex.quote(remote_tmp)}"],
+                timeout=TIMEOUT_SECONDS,
+            )
+            raise
     finally:
         os.unlink(local_tmp)
 
