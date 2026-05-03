@@ -23,7 +23,8 @@
         }
 
         #device-id {
-            font-size: 20px;
+            font-size: 22px;
+            font-weight: bold;
             color: rgba(255, 255, 255, 0.7);
             margin-bottom: 0.25em;
         }
@@ -35,13 +36,13 @@
 
         #temperature {
             font-weight: bold;
-            font-size: clamp(120px, 25vw, 300px);
+            font-size: clamp(180px, 37.5vw, 450px);
             color: #1c7bb7;
             line-height: 1;
         }
 
         .unit {
-            font-size: clamp(40px, 8vw, 80px);
+            font-size: clamp(180px, 37.5vw, 450px);
             color: #1c7bb7;
             font-weight: bold;
         }
@@ -65,7 +66,7 @@
             try {
                 var date = new Date(isoString);
                 if (isNaN(date.getTime())) return isoString;
-                return date.toLocaleString();
+                return date.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
             } catch (e) {
                 return isoString;
             }
@@ -74,7 +75,7 @@
         function updateDisplay(data) {
             document.getElementById('device-id').textContent = data.device_id || '';
             document.getElementById('temperature').textContent = data.temperature;
-            document.getElementById('updated-at').textContent = 'Last updated: ' + formatTimestamp(data.updated_at);
+            document.getElementById('updated-at').textContent = 'Last updated: ' + formatTimestamp(data.time);
             document.title = data.temperature + '\u00B0C';
         }
 
