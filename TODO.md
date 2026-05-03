@@ -172,6 +172,102 @@
 
 ---
 
+### T-017: Add OpenGraph meta tags and generate dynamic OG image
+
+**Context:** When the page URL is shared on social media, messaging apps, or link previews, there are no OpenGraph tags, so it shows a blank or generic preview. The page should include full OG meta tags and a dynamically generated image that displays the current temperature in the same visual style as the web page (light blue background, large bold number).
+
+**Requirements:**
+- [ ] Add the following OpenGraph meta tags to `<head>` in `site/index.html`:
+  ```html
+  <meta property="og:title" content="Temperature">
+  <meta property="og:description" content="Current temperature reading">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  ```
+  Also add Twitter Card tags for broader compatibility:
+  ```html
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Temperature">
+  <meta name="twitter:description" content="Current temperature reading">
+  <meta name="twitter:image" content="og-image.png">
+  ```
+- [ ] Generate `site/og-image.png` (1200x630px) in `publish_temperature.py` using the Pillow library:
+  - Add `Pillow` to `requirements.txt` (pin to current version)
+  - Background: `#90c0de` (same light blue as the page)
+  - Temperature value centered, bold, large font (~200px), color `#1c7bb7`
+  - Include `°C` suffix at the same size as the number
+  - Device ID label above in smaller white text (~40px), color `rgba(255,255,255,0.7)` approximated as `#ffffffb3` or `(255,255,255,178)`
+  - Use a bundled font: include `Arial` or a free alternative like `DejaVu Sans` (available on most Linux systems at `/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf`), or bundle a `.ttf` in the repo under `fonts/`
+  - Generate the image in `publish()` before the Wrangler deploy, so it is included in the deployed site
+- [ ] The OG image must be regenerated on every publish run so it always shows the current temperature
+- [ ] Update the JS in `index.html` to also update the `og:description` meta tag content with the current temperature value (note: this only affects in-page reads, crawlers see the static HTML)
+
+**Testing:**
+- [ ] Run the script, verify `site/og-image.png` is created with correct dimensions (1200x630)
+- [ ] Open the image, verify it shows the temperature value on the light blue background
+- [ ] Paste the deployed URL into https://www.opengraph.xyz/ or the Facebook Sharing Debugger and verify the preview shows the OG image and correct title/description
+- [ ] Add `site/og-image.png` to `.gitignore` (it is a generated artifact like `temperature.json`)
+
+**Estimated Effort:** 2h
+
+---
+
+### T-018: Add security headers via Cloudflare Pages _headers file
+
+**Context:** The site currently serves no security headers. Cloudflare Pages supports a `_headers` file in the site directory that applies custom HTTP response headers to all deployed assets. Since this is a simple static site with inline CSS, inline JS, and a single `fetch()` call to same-origin `temperature.json`, the Content Security Policy can be strict.
+
+**Requirements:**
+- [ ] Create `site/_headers` with the following content (one rule block applying to all paths):
+  ```
+  /*
+    X-Content-Type-Options: nosniff
+    X-Frame-Options: DENY
+    Referrer-Policy: no-referrer
+    Permissions-Policy: camera=(), microphone=(), geolocation=(), interest-cohort=()
+    Content-Security-Policy: default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'self'; font-src 'none'; frame-ancestors 'none'
+    Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+    X-DNS-Prefetch-Control: off
+    Cross-Origin-Opener-Policy: same-origin
+    Cross-Origin-Resource-Policy: same-origin
+  ```
+  Header explanations for the team:
+  - `X-Content-Type-Options: nosniff` prevents the browser from guessing MIME types, reducing XSS risk
+  - `X-Frame-Options: DENY` prevents the page from being embedded in iframes (clickjacking protection)
+  - `Referrer-Policy: no-referrer` prevents sending the URL to third parties when following links
+  - `Permissions-Policy` disables browser features the site does not use (camera, mic, location, FLoC)
+  - `Content-Security-Policy` controls which resources the browser is allowed to load:
+    - `default-src 'none'` blocks everything by default
+    - `script-src 'self' 'unsafe-inline'` allows the inline `<script>` in index.html (required since the JS is inline, not a separate file)
+    - `style-src 'self' 'unsafe-inline'` allows the inline `<style>` block
+    - `img-src 'self'` allows same-origin images (needed for og-image.png if T-017 lands)
+    - `connect-src 'self'` allows the `fetch('temperature.json')` call
+    - `frame-ancestors 'none'` reinforces the X-Frame-Options DENY
+  - `Strict-Transport-Security` enforces HTTPS for 1 year with subdomain coverage
+  - `Cross-Origin-Opener-Policy` and `Cross-Origin-Resource-Policy` isolate the page from cross-origin interactions
+- [ ] Add a separate rule for `temperature.json` to prevent caching (also addresses T-015):
+  ```
+  /temperature.json
+    Cache-Control: no-cache, no-store, must-revalidate
+    Access-Control-Allow-Origin: *
+  ```
+  - `no-cache, no-store, must-revalidate` ensures Cloudflare's CDN and the browser always fetch fresh data
+  - `Access-Control-Allow-Origin: *` allows the JSON to be consumed by other tools if needed
+- [ ] The `_headers` file must NOT be in `.gitignore` since it is a static config file, not a generated artifact
+- [ ] Deploy and verify headers are applied
+
+**Testing:**
+- [ ] Deploy the site with the `_headers` file and verify headers using `curl -I <site-url>`
+- [ ] Verify `X-Content-Type-Options`, `X-Frame-Options`, `Content-Security-Policy`, and `Strict-Transport-Security` are present in the response
+- [ ] Verify `temperature.json` returns `Cache-Control: no-cache, no-store, must-revalidate`
+- [ ] Open the page in Chrome DevTools > Network tab, confirm no CSP violations in the Console
+- [ ] Scan the deployed URL at https://securityheaders.com/ and aim for an A or A+ grade
+
+**Estimated Effort:** 1h
+
+---
+
 ## Completed (archived)
 
 All original tickets T-001 through T-008 have been implemented, tested, and committed. The following is a summary for reference:
@@ -193,6 +289,6 @@ All original tickets T-001 through T-008 have been implemented, tested, and comm
 
 ## Stats
 
-- **Open tickets:** 6 (2 manual QA, 3 hardening, 1 packaging)
+- **Open tickets:** 8 (2 manual QA, 4 hardening/security, 1 packaging, 1 feature)
 - **Completed tickets:** 13 (T-001 through T-010)
-- **Estimated remaining effort:** 7h
+- **Estimated remaining effort:** 10h
