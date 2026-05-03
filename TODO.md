@@ -294,6 +294,20 @@
 
 ---
 
+### T-020: Add configurable query range to prevent full-bucket scans
+
+**Context:** Found during code review (see `__doc/code_reviews/20260503-1000_implementation_batch_review.md`). The Flux query uses `range(start: 0)` which scans from epoch. For a bucket accumulating years of data across many devices, this forces InfluxDB to process the entire series before `last()` can aggregate. This may cause slow queries or timeouts as the bucket grows.
+
+**Requirements:**
+- [ ] Add a `QUERY_RANGE` env var (default: `-30d`) to `.env.example` and the `_parse_int_env` section
+- [ ] Use it in the Flux query: `range(start: {QUERY_RANGE})`
+- [ ] Validate the format (must start with `-` and end with `s`, `m`, `h`, `d`, or `w`)
+- [ ] Document in `SETUP.md` that this controls how far back the query looks, and that `-30d` is generous for a sensor that reports every few minutes
+
+**Estimated Effort:** 30min
+
+---
+
 ## Completed (archived)
 
 All original tickets T-001 through T-008 have been implemented, tested, and committed. The following is a summary for reference:
