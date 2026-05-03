@@ -17,4 +17,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY publish_temperature.py .
 COPY site/ site/
 
+RUN useradd -r appuser && chown -R appuser:appuser /app
+USER appuser
+
 CMD ["python", "publish_temperature.py"]
