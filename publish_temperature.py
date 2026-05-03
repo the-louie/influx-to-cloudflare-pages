@@ -259,6 +259,7 @@ data
             "temperature": last_value,
             "time": last_time.isoformat(),
             "device_id": DEVICE_ID,
+            "device_name": _pretty_device_name(DEVICE_ID),
             "min_36h": min_36h,
             "max_36h": max_36h,
             "updated_at": datetime.now(timezone.utc).isoformat(),
