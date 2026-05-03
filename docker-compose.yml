@@ -3,5 +3,3 @@ services:
     build: .
     env_file:
       - .env
-    volumes:
-      - ./site:/app/site
