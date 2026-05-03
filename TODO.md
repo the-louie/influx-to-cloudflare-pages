@@ -78,6 +78,56 @@
 
 ---
 
+### T-013: Move TEMP_MIN/TEMP_MAX parsing to module level and validate
+
+**Context:** Found during code review (see `__doc/code_reviews/20260503-0900_full_codebase_review.md`). Lines 88-89 of `publish_temperature.py` parse `TEMP_MIN` and `TEMP_MAX` from environment on every `fetch_temperature()` call. If a non-integer value is set (e.g. `TEMP_MIN=abc`), it raises `ValueError` on every cron run with a confusing "Failed: invalid literal for int()" message. The same issue applies to `TIMEOUT_SECONDS` and `DEPLOY_TIMEOUT_SECONDS` on lines 48-49.
+
+**Requirements:**
+- [ ] Move `temp_min` and `temp_max` parsing to module level, below `DEPLOY_TIMEOUT_SECONDS`
+- [ ] Wrap all `int()` conversions for optional env vars in a helper or try/except that produces a clear error naming the variable
+- [ ] Remove the `int()` calls from inside `fetch_temperature()`
+
+**Testing:**
+- [ ] Set `TEMP_MIN=abc` in env, import module, assert clear error message mentioning `TEMP_MIN`
+- [ ] Set `TIMEOUT_SECONDS=fast`, assert clear error message mentioning `TIMEOUT_SECONDS`
+
+**Estimated Effort:** 1h
+
+---
+
+### T-014: Validate SITE_DIR exists at startup
+
+**Context:** Found during code review. `SITE_DIR` on line 51 of `publish_temperature.py` assumes the `site/` directory exists relative to the script. If invoked from an unexpected location or if `site/` was deleted, `publish()` raises `FileNotFoundError` with no helpful context.
+
+**Requirements:**
+- [ ] After `SITE_DIR` is defined (line 51), add a check: if `not SITE_DIR.is_dir()`, log an error and `sys.exit(1)`
+- [ ] The error message should include the resolved path so the operator knows where to look
+
+**Testing:**
+- [ ] Monkeypatch `SITE_DIR` to a non-existent path, import module, assert `sys.exit(1)` and error message contains the path
+
+**Estimated Effort:** 30min
+
+---
+
+### T-015: Add Cloudflare CDN cache busting for temperature.json
+
+**Context:** Found during code review. The `index.html` fetches `temperature.json` every 60 seconds, but Cloudflare's CDN may serve a stale cached version. There is no cache-busting query parameter and no `Cache-Control` header configuration. This means the page could show stale temperature data even after a fresh deploy.
+
+**Requirements:**
+- [ ] Option A: In `index.html`, append a timestamp query parameter to the fetch URL: `'temperature.json?t=' + Date.now()`
+- [ ] Option B: Create a `site/_headers` file with `Cache-Control: no-cache` for `temperature.json` (Cloudflare Pages supports this)
+- [ ] Choose one approach and implement it
+
+**Testing:**
+- [ ] If Option A: verify the fetch URL in `index.html` includes a query parameter
+- [ ] If Option B: verify `site/_headers` exists and contains the correct rule
+- [ ] Deploy and confirm the JSON file is not stale after update
+
+**Estimated Effort:** 30min
+
+---
+
 ## Completed (archived)
 
 All original tickets T-001 through T-008 have been implemented, tested, and committed. The following is a summary for reference:
@@ -99,6 +149,6 @@ All original tickets T-001 through T-008 have been implemented, tested, and comm
 
 ## Stats
 
-- **Open tickets:** 4 (1 bug fix, 1 improvement, 2 manual verification)
-- **Completed tickets:** 11
-- **Estimated remaining effort:** 3.5h
+- **Open tickets:** 5 (2 manual QA, 3 hardening from code review)
+- **Completed tickets:** 13 (T-001 through T-010)
+- **Estimated remaining effort:** 5.5h
