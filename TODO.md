@@ -128,6 +128,50 @@
 
 ---
 
+### T-016: Package as Docker container with docker-compose.yml
+
+**Context:** The project currently requires manual setup of Python, Node.js/npx, and pip dependencies. Packaging it as a Docker container makes deployment reproducible and simplifies cron setup on any host. The container needs both Python (for the script) and Node.js (for `npx wrangler`).
+
+**Requirements:**
+- [ ] Create a `Dockerfile` in the project root:
+  - Use `python:3.11-slim` as the base image
+  - Install Node.js (via `apt-get install -y nodejs npm` or use a multi-stage build with `node:20-slim`)
+  - Copy `requirements.txt` and run `pip install --no-cache-dir -r requirements.txt`
+  - Copy `publish_temperature.py` and the `site/` directory into the image
+  - Set the working directory to `/app`
+  - Default command: `python publish_temperature.py`
+  - Do NOT copy `.env` into the image (secrets must not be baked into the image)
+- [ ] Create a `docker-compose.yml` in the project root:
+  ```yaml
+  services:
+    publisher:
+      build: .
+      env_file:
+        - .env
+      volumes:
+        - ./site:/app/site
+  ```
+  - The `env_file` directive reads all variables from `.env` automatically, no changes needed to the Python code since `os.environ` sees them
+  - The volume mount for `site/` ensures `temperature.json` is written to the host (optional, useful for debugging)
+- [ ] Add a `.dockerignore` file to exclude `.env`, `.venv/`, `__pycache__/`, `.git/`, `__doc/`, `*.pyc`, and `test_publish_temperature.py` from the build context
+- [ ] Verify the container runs correctly: `docker compose up --build`
+- [ ] Verify the container exits cleanly with code 0 on success and code 1 on failure
+- [ ] Document the Docker usage in `README.md`:
+  - `docker compose up --build` for a single run
+  - Cron example: `*/5 * * * * cd /path/to/project && docker compose up --build 2>&1 >> /var/log/temperature.log`
+  - Or use `docker compose up -d` with `restart: "no"` and an external cron/systemd timer
+- [ ] Note on `npx wrangler`: the first run inside the container will download Wrangler since it is not globally installed. To speed up repeated runs, either `RUN npm install -g wrangler` in the Dockerfile, or use a named volume for the npm cache
+
+**Testing:**
+- [ ] `docker compose build` succeeds without errors
+- [ ] `docker compose run --rm publisher` with a valid `.env` fetches data and deploys (or logs the expected error if InfluxDB/Cloudflare are unreachable)
+- [ ] `docker compose run --rm publisher` without `.env` exits with code 1 and prints the missing variables message
+- [ ] Verify no secrets are in the built image: `docker history <image>` and `docker run --rm <image> env` should not contain tokens
+
+**Estimated Effort:** 1-2h
+
+---
+
 ## Completed (archived)
 
 All original tickets T-001 through T-008 have been implemented, tested, and committed. The following is a summary for reference:
@@ -149,6 +193,6 @@ All original tickets T-001 through T-008 have been implemented, tested, and comm
 
 ## Stats
 
-- **Open tickets:** 5 (2 manual QA, 3 hardening from code review)
+- **Open tickets:** 6 (2 manual QA, 3 hardening, 1 packaging)
 - **Completed tickets:** 13 (T-001 through T-010)
-- **Estimated remaining effort:** 5.5h
+- **Estimated remaining effort:** 7h
