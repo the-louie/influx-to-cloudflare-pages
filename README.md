@@ -31,15 +31,16 @@ A minimal, single-page display inspired by [vecka.nu](https://vecka.nu/):
 ## Quick Start
 
 ```bash
-# 1. Clone and install dependencies
+# 1. Create and activate a virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# 2. Install dependencies
 pip install -r requirements.txt
 
-# 2. Configure environment
+# 3. Configure environment
 cp .env.example .env
 # Edit .env with your values (see SETUP.md for detailed guidance)
-
-# 3. Authenticate Wrangler (first time only)
-npx wrangler login
 
 # 4. Run
 python publish_temperature.py
@@ -49,11 +50,7 @@ For detailed instructions on where to find each configuration value, see [SETUP.
 
 ## Wrangler Authentication
 
-Since this runs via cron, the authentication flow is:
-
-1. Run the script manually the first time and log in via the browser prompt
-2. Wrangler persists the login credentials locally for future runs
-3. The `CLOUDFLARE_API_TOKEN` in `.env` is used for API authentication on subsequent runs
+Wrangler authenticates automatically using the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` environment variables from your `.env` file. No interactive login (`wrangler login`) is needed, which makes it safe to run unattended via cron.
 
 ## Configuration
 
@@ -77,18 +74,40 @@ All configuration lives in a `.env` file (not committed to git). Copy `.env.exam
 | `TEMP_MIN` | No | Low bound for sanity check (default: -50) |
 | `TEMP_MAX` | No | High bound for sanity check (default: 80) |
 
+### Creating an InfluxDB API Token
+
+1. Open the InfluxDB UI (e.g. `http://localhost:8086`)
+2. Go to **Load Data** > **API Tokens**
+3. Click **Generate API Token** > **Custom API Token**
+4. Under **Read**, select your bucket (e.g. `home_assistant`)
+5. Leave **Write** unchecked, the script only needs read access
+6. Click **Generate** and copy the token into your `.env`
+
+### Creating a Cloudflare API Token
+
+1. Log in to the [Cloudflare dashboard](https://dash.cloudflare.com)
+2. Click your profile icon > **My Profile** > **API Tokens**
+3. Click **Create Token**
+4. Use the **Edit Cloudflare Pages** template, or create a custom token with **Cloudflare Pages: Edit** permission
+5. Click **Continue to summary** > **Create Token**
+6. Copy the token into your `.env` as `CLOUDFLARE_API_TOKEN`
+
+To find your **Account ID**, go to **Workers & Pages** in the Cloudflare dashboard. Your Account ID is shown in the **Account details** section with a click-to-copy button. Alternatively, on the **Account home** page, click the menu button next to your account name and select **Copy account ID**.
+
+For all other configuration values, see [SETUP.md](SETUP.md) for detailed instructions with UI paths.
+
 ## Cron Setup
 
 Run every 5 minutes:
 
 ```
-*/5 * * * * cd /path/to/project && /path/to/venv/bin/python publish_temperature.py
+*/5 * * * * cd /path/to/project && .venv/bin/python publish_temperature.py
 ```
 
 Logging goes to stderr with timestamps, so you can redirect to a log file:
 
 ```
-*/5 * * * * cd /path/to/project && /path/to/venv/bin/python publish_temperature.py >> /var/log/temperature.log 2>&1
+*/5 * * * * cd /path/to/project && .venv/bin/python publish_temperature.py >> /var/log/temperature.log 2>&1
 ```
 
 ## Project Structure

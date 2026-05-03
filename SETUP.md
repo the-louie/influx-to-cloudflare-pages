@@ -114,8 +114,9 @@ Your Cloudflare account identifier.
 How to find it:
 
 1. Log in to the [Cloudflare dashboard](https://dash.cloudflare.com)
-2. The **Account ID** is shown in the right sidebar on the overview page
-3. Alternatively, run: `npx wrangler whoami`
+2. Go to **Workers & Pages**, your Account ID is shown in the **Account details** section with a click-to-copy button
+3. Alternatively, on the **Account home** page, click the menu button next to your account name and select **Copy account ID**
+4. You can also run: `npx wrangler whoami`
 
 ### `CLOUDFLARE_PROJECT_NAME`
 
