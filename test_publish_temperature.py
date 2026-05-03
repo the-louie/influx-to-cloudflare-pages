@@ -46,41 +46,13 @@ def _import_fresh():
 
 
 # ---------------------------------------------------------------------------
-# T-002: Parameterized Flux query
+# T-002: Flux query input validation
 # ---------------------------------------------------------------------------
 
-class TestFluxQueryParameterization:
-    """T-002: Verify query uses params instead of f-string interpolation."""
+class TestFluxQueryValidation:
+    """T-002: Verify query values are validated against injection."""
 
-    def test_query_uses_params(self, monkeypatch):
-        mod = _import_fresh()
-
-        mock_record = MagicMock()
-        mock_record.get_value.return_value = 22.5
-        mock_record.get_time.return_value = datetime(2026, 5, 2, tzinfo=timezone.utc)
-
-        mock_table = MagicMock()
-        mock_table.records = [mock_record]
-
-        mock_query_api = MagicMock()
-        mock_query_api.query.return_value = [mock_table]
-
-        mock_client = MagicMock()
-        mock_client.query_api.return_value = mock_query_api
-
-        monkeypatch.setattr(mod, "InfluxDBClient", lambda **kw: mock_client)
-
-        mod.fetch_temperature()
-
-        call_args = mock_query_api.query.call_args
-        assert "params" in call_args.kwargs
-        params = call_args.kwargs["params"]
-        assert params["measurement"] == "http_listener_v2"
-        assert params["field"] == "temperature"
-        assert params["device_id"] == "gisebo-01"
-        assert params["host_filter"] == "61781446e5e9"
-
-    def test_query_string_uses_params_references(self, monkeypatch):
+    def test_query_contains_filter_values(self, monkeypatch):
         mod = _import_fresh()
 
         mock_query_api = MagicMock()
@@ -92,28 +64,17 @@ class TestFluxQueryParameterization:
         mod.fetch_temperature()
 
         query = mock_query_api.query.call_args[0][0]
-        assert "params.measurement" in query
-        assert "params.field" in query
-        assert "params.device_id" in query
-        assert "params.host_filter" in query
         assert "home_assistant" in query
+        assert "http_listener_v2" in query
+        assert "temperature" in query
+        assert "gisebo-01" in query
+        assert "61781446e5e9" in query
 
-    def test_injection_in_device_id_stays_in_params(self, monkeypatch):
+    def test_injection_in_device_id_is_rejected(self, monkeypatch):
         monkeypatch.setenv("DEVICE_ID", '") |> drop(')
         mod = _import_fresh()
-
-        mock_query_api = MagicMock()
-        mock_query_api.query.return_value = []
-        mock_client = MagicMock()
-        mock_client.query_api.return_value = mock_query_api
-        monkeypatch.setattr(mod, "InfluxDBClient", lambda **kw: mock_client)
-
-        mod.fetch_temperature()
-
-        query = mock_query_api.query.call_args[0][0]
-        params = mock_query_api.query.call_args.kwargs["params"]
-        assert '") |> drop(' not in query
-        assert params["device_id"] == '") |> drop('
+        with pytest.raises(ValueError, match="Invalid character in DEVICE_ID"):
+            mod.fetch_temperature()
 
     def test_invalid_bucket_name_raises(self, monkeypatch):
         monkeypatch.setenv("INFLUXDB_BUCKET", 'bad"; drop')
@@ -130,6 +91,12 @@ class TestFluxQueryParameterization:
         monkeypatch.setattr(mod, "InfluxDBClient", lambda **kw: mock_client)
 
         mod.fetch_temperature()
+
+    def test_backslash_in_filter_value_rejected(self, monkeypatch):
+        monkeypatch.setenv("FIELD", 'temp\\n')
+        mod = _import_fresh()
+        with pytest.raises(ValueError, match="Invalid character in FIELD"):
+            mod.fetch_temperature()
 
 
 # ---------------------------------------------------------------------------

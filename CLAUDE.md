@@ -20,7 +20,7 @@ Fetch a temperature data point from InfluxDB (backing a Grafana dashboard) and p
 ## Flux Query
 ```flux
 from(bucket: "home_assistant")
-  |> range(start: -5m)
+  |> range(start: 0)
   |> filter(fn: (r) => r["_measurement"] == params.measurement)
   |> filter(fn: (r) => r["_field"] == params.field)
   |> filter(fn: (r) => r["device_id"] == params.device_id)

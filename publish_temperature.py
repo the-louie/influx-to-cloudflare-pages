@@ -51,28 +51,32 @@ DEPLOY_TIMEOUT_SECONDS = int(os.environ.get("DEPLOY_TIMEOUT_SECONDS", "120"))
 SITE_DIR = Path(__file__).parent / "site"
 
 
+def _validate_flux_value(name, value):
+    """Reject values containing characters that could alter the Flux query structure."""
+    if '"' in value or '\\' in value:
+        raise ValueError(f"Invalid character in {name}: {value!r}")
+
+
 def fetch_temperature():
     if not re.match(r"^[a-zA-Z0-9_-]+$", INFLUXDB_BUCKET):
         raise ValueError(f"Invalid bucket name: {INFLUXDB_BUCKET}")
 
+    for name, val in [("MEASUREMENT", MEASUREMENT), ("FIELD", FIELD),
+                      ("DEVICE_ID", DEVICE_ID), ("HOST_FILTER", HOST_FILTER)]:
+        _validate_flux_value(name, val)
+
     query = f"""
 from(bucket: "{INFLUXDB_BUCKET}")
-  |> range(start: -5m)
-  |> filter(fn: (r) => r["_measurement"] == params.measurement)
-  |> filter(fn: (r) => r["_field"] == params.field)
-  |> filter(fn: (r) => r["device_id"] == params.device_id)
-  |> filter(fn: (r) => r["host"] == params.host_filter)
+  |> range(start: 0)
+  |> filter(fn: (r) => r["_measurement"] == "{MEASUREMENT}")
+  |> filter(fn: (r) => r["_field"] == "{FIELD}")
+  |> filter(fn: (r) => r["device_id"] == "{DEVICE_ID}")
+  |> filter(fn: (r) => r["host"] == "{HOST_FILTER}")
   |> last()
 """
-    params = {
-        "measurement": MEASUREMENT,
-        "field": FIELD,
-        "device_id": DEVICE_ID,
-        "host_filter": HOST_FILTER,
-    }
     client = InfluxDBClient(url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG, timeout=TIMEOUT_SECONDS * 1000)
     try:
-        tables = client.query_api().query(query, params=params)
+        tables = client.query_api().query(query)
         for table in tables:
             for record in table.records:
                 value = record.get_value()
@@ -114,6 +118,7 @@ def publish(data):
             "npx", "wrangler", "pages", "deploy",
             str(SITE_DIR),
             "--project-name", CLOUDFLARE_PROJECT_NAME,
+            "--commit-dirty=true",
         ],
         check=True,
         timeout=DEPLOY_TIMEOUT_SECONDS,
