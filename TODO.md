@@ -7,15 +7,15 @@
 **Context:** T-005b specified "Log exceptions from `subprocess.CalledProcessError` and `InfluxDBClient` failures at `logging.error` level," and the checkbox was marked complete, but this was never implemented. Currently in `publish_temperature.py`, if the Wrangler deploy fails (`subprocess.CalledProcessError`) or the InfluxDB client throws, the raw traceback goes to stderr with no structured log entry. Under cron, this traceback may be lost entirely.
 
 **Requirements:**
-- [ ] In `main()` in `publish_temperature.py` (line 122), wrap the `fetch_temperature()` and `publish(data)` calls in a `try/except` block
-- [ ] Catch `subprocess.CalledProcessError` and log with `logging.error(f"Deploy failed: {e}")`
-- [ ] Catch `Exception` broadly as a fallback and log with `logging.error(f"Unexpected error: {e}", exc_info=True)`
-- [ ] Re-raise or `sys.exit(1)` after logging so the cron job still reports a non-zero exit code
+- [x] In `main()` in `publish_temperature.py` (line 122), wrap the `fetch_temperature()` and `publish(data)` calls in a `try/except` block
+- [x] Catch `subprocess.CalledProcessError` and log with `logging.error(f"Deploy failed: {e}")`
+- [x] Catch `Exception` broadly as a fallback and log with `logging.error(f"Unexpected error: {e}", exc_info=True)`
+- [x] Re-raise or `sys.exit(1)` after logging so the cron job still reports a non-zero exit code
 
 **Testing:**
-- [ ] In `test_publish_temperature.py`, monkeypatch `subprocess.run` to raise `CalledProcessError`, call `main()`, assert log contains "Deploy failed" at ERROR level
-- [ ] Monkeypatch `InfluxDBClient` to raise `ConnectionError`, call `main()`, assert log contains "Unexpected error" at ERROR level
-- [ ] Assert `sys.exit(1)` is called in both cases
+- [x] In `test_publish_temperature.py`, monkeypatch `subprocess.run` to raise `CalledProcessError`, call `main()`, assert log contains "Deploy failed" at ERROR level
+- [x] Monkeypatch `InfluxDBClient` to raise `ConnectionError`, call `main()`, assert log contains "Unexpected error" at ERROR level
+- [x] Assert `sys.exit(1)` is called in both cases
 
 **Estimated Effort:** 1h
 
@@ -26,16 +26,16 @@
 **Context:** `TIMEOUT_SECONDS` (default 30) is shared between the InfluxDB query and the Wrangler deploy subprocess. A Cloudflare Pages deployment involves uploading files and waiting for edge propagation, which can exceed 30 seconds on slow connections or during Cloudflare incidents. The InfluxDB query, by contrast, should complete in under a second.
 
 **Requirements:**
-- [ ] In `publish_temperature.py`, add a separate `DEPLOY_TIMEOUT_SECONDS = int(os.environ.get("DEPLOY_TIMEOUT_SECONDS", "120"))` on the line after `TIMEOUT_SECONDS`
-- [ ] Change the `timeout=` kwarg in the Wrangler `subprocess.run` call (line 118) from `TIMEOUT_SECONDS` to `DEPLOY_TIMEOUT_SECONDS`
-- [ ] Keep `TIMEOUT_SECONDS` for the InfluxDB client timeout (line 72), it remains appropriate there
-- [ ] Add `# DEPLOY_TIMEOUT_SECONDS=120` to `.env.example` under the existing timeout comment
-- [ ] Add a `DEPLOY_TIMEOUT_SECONDS` entry to section 4 of `SETUP.md`
+- [x] In `publish_temperature.py`, add a separate `DEPLOY_TIMEOUT_SECONDS = int(os.environ.get("DEPLOY_TIMEOUT_SECONDS", "120"))` on the line after `TIMEOUT_SECONDS`
+- [x] Change the `timeout=` kwarg in the Wrangler `subprocess.run` call (line 118) from `TIMEOUT_SECONDS` to `DEPLOY_TIMEOUT_SECONDS`
+- [x] Keep `TIMEOUT_SECONDS` for the InfluxDB client timeout (line 72), it remains appropriate there
+- [x] Add `# DEPLOY_TIMEOUT_SECONDS=120` to `.env.example` under the existing timeout comment
+- [x] Add a `DEPLOY_TIMEOUT_SECONDS` entry to section 4 of `SETUP.md`
 
 **Testing:**
-- [ ] In `test_publish_temperature.py`, monkeypatch `subprocess.run`, call `publish()`, assert timeout is 120 (not 30)
-- [ ] Set `DEPLOY_TIMEOUT_SECONDS=60` in env, reimport, call `publish()`, assert timeout is 60
-- [ ] Assert InfluxDB client timeout remains `TIMEOUT_SECONDS * 1000` (unchanged)
+- [x] In `test_publish_temperature.py`, monkeypatch `subprocess.run`, call `publish()`, assert timeout is 120 (not 30)
+- [x] Set `DEPLOY_TIMEOUT_SECONDS=60` in env, reimport, call `publish()`, assert timeout is 60
+- [x] Assert InfluxDB client timeout remains `TIMEOUT_SECONDS * 1000` (unchanged)
 
 **Estimated Effort:** 1h
 
