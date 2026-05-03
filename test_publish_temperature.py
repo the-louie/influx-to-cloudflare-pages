@@ -45,6 +45,21 @@ def _import_fresh():
     return publish_temperature
 
 
+_MINIMAL_INDEX_HTML = (
+    '<html><head><!-- OG_META_START -->'
+    '<meta property="og:image" content="og-image.png">'
+    '<!-- OG_META_END --></head><body></body></html>'
+)
+
+
+def _make_site_dir(tmp_path):
+    """Create a temp site directory with a minimal index.html for publish() tests."""
+    site_dir = tmp_path / "site"
+    site_dir.mkdir()
+    (site_dir / "index.html").write_text(_MINIMAL_INDEX_HTML)
+    return site_dir
+
+
 # ---------------------------------------------------------------------------
 # T-002: Flux query input validation
 # ---------------------------------------------------------------------------
@@ -320,8 +335,7 @@ class TestCloudflarePublish:
         mod = _import_fresh()
 
         # Point SITE_DIR to a temp directory
-        site_dir = tmp_path / "site"
-        site_dir.mkdir()
+        site_dir = _make_site_dir(tmp_path)
         monkeypatch.setattr(mod, "SITE_DIR", site_dir)
         monkeypatch.setattr(subprocess, "run", lambda *a, **kw: None)
 
@@ -344,8 +358,7 @@ class TestCloudflarePublish:
     def test_publish_calls_wrangler_with_correct_args(self, monkeypatch, tmp_path):
         mod = _import_fresh()
 
-        site_dir = tmp_path / "site"
-        site_dir.mkdir()
+        site_dir = _make_site_dir(tmp_path)
         monkeypatch.setattr(mod, "SITE_DIR", site_dir)
 
         calls = []
@@ -372,8 +385,7 @@ class TestCloudflarePublish:
     def test_publish_uses_check_true(self, monkeypatch, tmp_path):
         mod = _import_fresh()
 
-        site_dir = tmp_path / "site"
-        site_dir.mkdir()
+        site_dir = _make_site_dir(tmp_path)
         monkeypatch.setattr(mod, "SITE_DIR", site_dir)
 
         calls = []
@@ -387,8 +399,7 @@ class TestCloudflarePublish:
     def test_publish_has_deploy_timeout(self, monkeypatch, tmp_path):
         mod = _import_fresh()
 
-        site_dir = tmp_path / "site"
-        site_dir.mkdir()
+        site_dir = _make_site_dir(tmp_path)
         monkeypatch.setattr(mod, "SITE_DIR", site_dir)
 
         calls = []
@@ -403,8 +414,7 @@ class TestCloudflarePublish:
         monkeypatch.setenv("DEPLOY_TIMEOUT_SECONDS", "60")
         mod = _import_fresh()
 
-        site_dir = tmp_path / "site"
-        site_dir.mkdir()
+        site_dir = _make_site_dir(tmp_path)
         monkeypatch.setattr(mod, "SITE_DIR", site_dir)
 
         calls = []
@@ -418,8 +428,7 @@ class TestCloudflarePublish:
     def test_no_ssh_scp_calls(self, monkeypatch, tmp_path):
         mod = _import_fresh()
 
-        site_dir = tmp_path / "site"
-        site_dir.mkdir()
+        site_dir = _make_site_dir(tmp_path)
         monkeypatch.setattr(mod, "SITE_DIR", site_dir)
 
         calls = []
@@ -496,8 +505,7 @@ class TestExceptionHandling:
         import logging
         mod = _import_fresh()
 
-        site_dir = tmp_path / "site"
-        site_dir.mkdir()
+        site_dir = _make_site_dir(tmp_path)
         monkeypatch.setattr(mod, "SITE_DIR", site_dir)
 
         mock_record = MagicMock()

@@ -55,6 +55,7 @@ HOST_FILTER = os.environ["HOST_FILTER"]
 
 # Cloudflare Pages
 CLOUDFLARE_PROJECT_NAME = os.environ["CLOUDFLARE_PROJECT_NAME"]
+SITE_URL = os.environ.get("SITE_URL", f"https://{CLOUDFLARE_PROJECT_NAME}.pages.dev").rstrip("/")
 
 TIMEOUT_SECONDS = _parse_int_env("TIMEOUT_SECONDS", "30")
 DEPLOY_TIMEOUT_SECONDS = _parse_int_env("DEPLOY_TIMEOUT_SECONDS", "120")
@@ -124,37 +125,87 @@ def generate_og_image(data):
     width, height = 1200, 630
     bg_color = (144, 192, 222)  # #90c0de
     text_color = (28, 123, 183)  # #1c7bb7
-    label_color = (255, 255, 255, 178)  # rgba(255,255,255,0.7)
+    white = (255, 255, 255, 255)  # #fff
 
     img = Image.new("RGBA", (width, height), bg_color)
     draw = ImageDraw.Draw(img)
 
-    # Try to load a bold font, fall back to default
     try:
         font_large = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 200)
         font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 40)
+        font_date = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 30)
     except OSError:
         font_large = ImageFont.load_default()
         font_small = ImageFont.load_default()
+        font_date = ImageFont.load_default()
 
-    # Draw device ID label
+    # Draw device ID label above temperature
     device_text = data.get("device_id", "")
     bbox = draw.textbbox((0, 0), device_text, font=font_small)
     text_w = bbox[2] - bbox[0]
-    draw.text(((width - text_w) / 2, 120), device_text, fill=label_color, font=font_small)
+    draw.text(((width - text_w) / 2, 130), device_text, fill=white, font=font_small)
 
-    # Draw temperature with unit
+    # Draw temperature with unit, centered
     temp_text = f"{data['temperature']}°C"
     bbox = draw.textbbox((0, 0), temp_text, font=font_large)
     text_w = bbox[2] - bbox[0]
     text_h = bbox[3] - bbox[1]
-    draw.text(((width - text_w) / 2, (height - text_h) / 2), temp_text, fill=text_color, font=font_large)
+    temp_y = (height - text_h) / 2
+    draw.text(((width - text_w) / 2, temp_y), temp_text, fill=text_color, font=font_large)
+
+    # Draw date below temperature
+    from datetime import datetime as _dt
+    try:
+        dt = _dt.fromisoformat(data["time"])
+        date_text = dt.strftime("%b %d, %Y %H:%M")
+    except (ValueError, KeyError):
+        date_text = ""
+    if date_text:
+        bbox = draw.textbbox((0, 0), date_text, font=font_date)
+        text_w = bbox[2] - bbox[0]
+        draw.text(((width - text_w) / 2, temp_y + text_h + 20), date_text, fill=white, font=font_date)
 
     img.save(SITE_DIR / "og-image.png")
 
 
+def _update_og_meta(data):
+    """Rewrite the OG meta tags in index.html with absolute URLs and current data."""
+    index_path = SITE_DIR / "index.html"
+    html = index_path.read_text()
+
+    temp = data["temperature"]
+    device = data["device_id"]
+    og_title = f"{temp}°C — {device} Temperature"
+    og_desc = f"Current reading: {temp}°C from sensor {device}. Live temperature display updated automatically."
+    og_image = f"{SITE_URL}/og-image.png"
+
+    og_block = f"""    <!-- OG_META_START -->
+    <meta property="og:title" content="{og_title}">
+    <meta property="og:description" content="{og_desc}">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="{SITE_URL}/">
+    <meta property="og:image" content="{og_image}">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{og_title}">
+    <meta name="twitter:description" content="{og_desc}">
+    <meta name="twitter:image" content="{og_image}">
+    <!-- OG_META_END -->"""
+
+    import re as _re
+    html = _re.sub(
+        r"    <!-- OG_META_START -->.*?<!-- OG_META_END -->",
+        og_block,
+        html,
+        flags=_re.DOTALL,
+    )
+    index_path.write_text(html)
+
+
 def publish(data):
     generate_og_image(data)
+    _update_og_meta(data)
     # Write temperature.json into the site directory
     json_path = SITE_DIR / "temperature.json"
     with open(json_path, "w") as f:
