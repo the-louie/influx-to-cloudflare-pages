@@ -1,0 +1,17 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+.claude/
+.wrangler/
+__doc/
+test_publish_temperature.py
+TODO.md
+TODO-summarized.md
+SETUP.md
+CLAUDE.md
+README.md
+site/temperature.json
+site/og-image.png
