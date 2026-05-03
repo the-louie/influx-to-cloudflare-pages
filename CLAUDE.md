@@ -1,12 +1,13 @@
 # Influx-to-Web Publisher
 
 ## Purpose
-Fetch a temperature data point from InfluxDB (backing a Grafana dashboard) and publish it as a JSON file to a remote static web server via SSH.
+Fetch a temperature data point from InfluxDB (backing a Grafana dashboard) and publish it as a JSON file to a Cloudflare Pages static site.
 
 ## Architecture
-- **Source:** InfluxDB 2.x with Flux queries, bucket `home_assistant`
-- **Transport:** SCP/rsync to remote host (write to temp file, then atomic move to avoid race conditions)
-- **Destination:** Static JSON file on a remote web server
+- **Source:** InfluxDB 2.x with parameterized Flux queries, bucket `home_assistant`
+- **Transport:** Wrangler CLI deploys the `site/` directory to Cloudflare Pages
+- **Destination:** Static site on Cloudflare Pages containing `index.html` (temperature display) and `temperature.json` (data)
+- **Frontend:** Single-page `index.html` with inline CSS/JS, displays temperature in large centered text, auto-refreshes every 60 seconds
 - **Automation:** Cron job runs the fetch-and-publish script periodically
 
 ## Key Data Point
@@ -20,15 +21,15 @@ Fetch a temperature data point from InfluxDB (backing a Grafana dashboard) and p
 ```flux
 from(bucket: "home_assistant")
   |> range(start: -5m)
-  |> filter(fn: (r) => r["_measurement"] == "http_listener_v2")
-  |> filter(fn: (r) => r["_field"] == "temperature")
-  |> filter(fn: (r) => r["device_id"] == "gisebo-01")
-  |> filter(fn: (r) => r["host"] == "61781446e5e9")
+  |> filter(fn: (r) => r["_measurement"] == params.measurement)
+  |> filter(fn: (r) => r["_field"] == params.field)
+  |> filter(fn: (r) => r["device_id"] == params.device_id)
+  |> filter(fn: (r) => r["host"] == params.host_filter)
   |> last()
 ```
 
 ## Project Conventions
-- All configuration lives in `.env` (not committed — listed in `.gitignore`)
+- All configuration lives in `.env` (not committed, listed in `.gitignore`)
 - Code and config are strictly separated
-- Python script using `influxdb-client` library
-- Atomic remote writes: scp to a temp file, then `ssh mv` to final path (or rsync which overwrites atomically)
+- Python script using `influxdb-client` library with parameterized queries
+- See `SETUP.md` for step-by-step configuration guide
