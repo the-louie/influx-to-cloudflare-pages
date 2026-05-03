@@ -227,6 +227,7 @@ def publish(data):
 
 def main():
     logging.basicConfig(format="%(asctime)s %(levelname)s %(message)s", level=logging.INFO)
+    logging.info(f"-------- STARTED {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')} --------")
     try:
         data = fetch_temperature()
         if data is None:
