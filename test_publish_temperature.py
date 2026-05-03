@@ -539,3 +539,56 @@ class TestExceptionHandling:
         assert exc_info.value.code == 1
         assert "Failed" in caplog.text
         assert "connection refused" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# T-013: Module-level env var parsing with clear errors
+# ---------------------------------------------------------------------------
+
+class TestEnvVarParsing:
+    """T-013: Verify invalid integer env vars produce clear errors."""
+
+    def test_invalid_temp_min_exits_with_message(self, monkeypatch, capsys):
+        monkeypatch.setenv("TEMP_MIN", "abc")
+        monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **kw: None)
+
+        with pytest.raises(SystemExit) as exc_info:
+            _import_fresh()
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "TEMP_MIN" in captured.err
+
+    def test_invalid_timeout_exits_with_message(self, monkeypatch, capsys):
+        monkeypatch.setenv("TIMEOUT_SECONDS", "fast")
+        monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **kw: None)
+
+        with pytest.raises(SystemExit) as exc_info:
+            _import_fresh()
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "TIMEOUT_SECONDS" in captured.err
+
+    def test_temp_min_max_at_module_level(self):
+        mod = _import_fresh()
+        assert mod.TEMP_MIN == -50
+        assert mod.TEMP_MAX == 80
+
+
+# ---------------------------------------------------------------------------
+# T-014: SITE_DIR validation
+# ---------------------------------------------------------------------------
+
+class TestSiteDirValidation:
+    """T-014: Verify missing site/ directory is caught at startup."""
+
+    def test_missing_site_dir_exits(self, monkeypatch, capsys, tmp_path):
+        monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **kw: None)
+        # Point Path(__file__).parent to a dir without site/
+        import pathlib
+        monkeypatch.setattr(pathlib.Path, "is_dir", lambda self: False if "site" in str(self) else True)
+
+        with pytest.raises(SystemExit) as exc_info:
+            _import_fresh()
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "site" in captured.err.lower()

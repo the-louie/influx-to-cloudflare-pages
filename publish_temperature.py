@@ -11,6 +11,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from PIL import Image, ImageDraw, ImageFont
 from dotenv import load_dotenv
 from influxdb_client import InfluxDBClient
 
@@ -30,6 +31,16 @@ if missing:
     )
     sys.exit(1)
 
+
+def _parse_int_env(name, default):
+    raw = os.environ.get(name, default)
+    try:
+        return int(raw)
+    except ValueError:
+        print(f"Invalid integer for {name}: {raw!r}", file=sys.stderr)
+        sys.exit(1)
+
+
 # InfluxDB config
 INFLUXDB_URL = os.environ["INFLUXDB_URL"]
 INFLUXDB_TOKEN = os.environ["INFLUXDB_TOKEN"]
@@ -45,10 +56,15 @@ HOST_FILTER = os.environ["HOST_FILTER"]
 # Cloudflare Pages
 CLOUDFLARE_PROJECT_NAME = os.environ["CLOUDFLARE_PROJECT_NAME"]
 
-TIMEOUT_SECONDS = int(os.environ.get("TIMEOUT_SECONDS", "30"))
-DEPLOY_TIMEOUT_SECONDS = int(os.environ.get("DEPLOY_TIMEOUT_SECONDS", "120"))
+TIMEOUT_SECONDS = _parse_int_env("TIMEOUT_SECONDS", "30")
+DEPLOY_TIMEOUT_SECONDS = _parse_int_env("DEPLOY_TIMEOUT_SECONDS", "120")
+TEMP_MIN = _parse_int_env("TEMP_MIN", "-50")
+TEMP_MAX = _parse_int_env("TEMP_MAX", "80")
 
 SITE_DIR = Path(__file__).parent / "site"
+if not SITE_DIR.is_dir():
+    print(f"Site directory not found: {SITE_DIR.resolve()}", file=sys.stderr)
+    sys.exit(1)
 
 
 def _validate_flux_value(name, value):
@@ -89,10 +105,8 @@ from(bucket: "{INFLUXDB_BUCKET}")
                 if not math.isfinite(value):
                     logging.warning(f"InfluxDB returned non-finite value: {value}")
                     return None
-                temp_min = int(os.environ.get("TEMP_MIN", "-50"))
-                temp_max = int(os.environ.get("TEMP_MAX", "80"))
-                if not (temp_min <= value <= temp_max):
-                    logging.warning(f"Temperature {value} outside expected range [{temp_min}, {temp_max}]")
+                if not (TEMP_MIN <= value <= TEMP_MAX):
+                    logging.warning(f"Temperature {value} outside expected range [{TEMP_MIN}, {TEMP_MAX}]")
                 return {
                     "temperature": value,
                     "time": record.get_time().isoformat(),
@@ -105,7 +119,42 @@ from(bucket: "{INFLUXDB_BUCKET}")
     return None
 
 
+def generate_og_image(data):
+    """Generate a 1200x630 OpenGraph image matching the page style."""
+    width, height = 1200, 630
+    bg_color = (144, 192, 222)  # #90c0de
+    text_color = (28, 123, 183)  # #1c7bb7
+    label_color = (255, 255, 255, 178)  # rgba(255,255,255,0.7)
+
+    img = Image.new("RGBA", (width, height), bg_color)
+    draw = ImageDraw.Draw(img)
+
+    # Try to load a bold font, fall back to default
+    try:
+        font_large = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 200)
+        font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 40)
+    except OSError:
+        font_large = ImageFont.load_default()
+        font_small = ImageFont.load_default()
+
+    # Draw device ID label
+    device_text = data.get("device_id", "")
+    bbox = draw.textbbox((0, 0), device_text, font=font_small)
+    text_w = bbox[2] - bbox[0]
+    draw.text(((width - text_w) / 2, 120), device_text, fill=label_color, font=font_small)
+
+    # Draw temperature with unit
+    temp_text = f"{data['temperature']}°C"
+    bbox = draw.textbbox((0, 0), temp_text, font=font_large)
+    text_w = bbox[2] - bbox[0]
+    text_h = bbox[3] - bbox[1]
+    draw.text(((width - text_w) / 2, (height - text_h) / 2), temp_text, fill=text_color, font=font_large)
+
+    img.save(SITE_DIR / "og-image.png")
+
+
 def publish(data):
+    generate_og_image(data)
     # Write temperature.json into the site directory
     json_path = SITE_DIR / "temperature.json"
     with open(json_path, "w") as f:
