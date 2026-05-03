@@ -165,7 +165,7 @@ def generate_og_image(data):
     if date_text:
         bbox = draw.textbbox((0, 0), date_text, font=font_date)
         text_w = bbox[2] - bbox[0]
-        draw.text(((width - text_w) / 2, temp_y + text_h + 36), date_text, fill=white, font=font_date)
+        draw.text(((width - text_w) / 2, temp_y + text_h + 68), date_text, fill=white, font=font_date)
 
     # Remove old OG images and save with a unique name to bust social media caches
     for old in glob.glob(str(SITE_DIR / "og-*.png")):
