@@ -46,6 +46,7 @@ HOST_FILTER = os.environ["HOST_FILTER"]
 CLOUDFLARE_PROJECT_NAME = os.environ["CLOUDFLARE_PROJECT_NAME"]
 
 TIMEOUT_SECONDS = int(os.environ.get("TIMEOUT_SECONDS", "30"))
+DEPLOY_TIMEOUT_SECONDS = int(os.environ.get("DEPLOY_TIMEOUT_SECONDS", "120"))
 
 SITE_DIR = Path(__file__).parent / "site"
 
@@ -115,19 +116,26 @@ def publish(data):
             "--project-name", CLOUDFLARE_PROJECT_NAME,
         ],
         check=True,
-        timeout=TIMEOUT_SECONDS,
+        timeout=DEPLOY_TIMEOUT_SECONDS,
     )
 
 
 def main():
     logging.basicConfig(format="%(asctime)s %(levelname)s %(message)s", level=logging.INFO)
-    data = fetch_temperature()
-    if data is None:
-        logging.error("No data returned from InfluxDB")
-        sys.exit(1)
+    try:
+        data = fetch_temperature()
+        if data is None:
+            logging.error("No data returned from InfluxDB")
+            sys.exit(1)
 
-    publish(data)
-    logging.info(f"Published: {data['temperature']}°C at {data['time']}")
+        publish(data)
+        logging.info(f"Published: {data['temperature']}°C at {data['time']}")
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Deploy failed: {e}")
+        sys.exit(1)
+    except Exception as e:
+        logging.error(f"Failed: {e}", exc_info=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

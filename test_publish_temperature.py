@@ -139,7 +139,7 @@ class TestFluxQueryParameterization:
 class TestTimeouts:
     """T-003: Verify timeout propagation to all blocking calls."""
 
-    def test_publish_subprocess_has_timeout(self, monkeypatch):
+    def test_publish_subprocess_has_deploy_timeout(self, monkeypatch):
         mod = _import_fresh()
         calls = []
 
@@ -151,18 +151,28 @@ class TestTimeouts:
         data = {"temperature": 22.5, "time": "t", "device_id": "d", "updated_at": "u"}
         mod.publish(data)
 
-        assert calls[0]["timeout"] == 30
+        assert calls[0]["timeout"] == 120
 
-    def test_custom_timeout(self, monkeypatch):
-        monkeypatch.setenv("TIMEOUT_SECONDS", "5")
+    def test_influxdb_timeout_independent_from_deploy_timeout(self, monkeypatch):
+        monkeypatch.setenv("TIMEOUT_SECONDS", "10")
+        monkeypatch.setenv("DEPLOY_TIMEOUT_SECONDS", "300")
         mod = _import_fresh()
-        calls = []
-        monkeypatch.setattr(subprocess, "run", lambda *a, **kw: calls.append(kw))
+        client_kwargs = {}
 
-        data = {"temperature": 22.5, "time": "t", "device_id": "d", "updated_at": "u"}
-        mod.publish(data)
+        mock_query_api = MagicMock()
+        mock_query_api.query.return_value = []
 
-        assert calls[0]["timeout"] == 5
+        def mock_client(**kwargs):
+            client_kwargs.update(kwargs)
+            m = MagicMock()
+            m.query_api.return_value = mock_query_api
+            return m
+
+        monkeypatch.setattr(mod, "InfluxDBClient", mock_client)
+        mod.fetch_temperature()
+
+        # InfluxDB client should use TIMEOUT_SECONDS (10), not DEPLOY_TIMEOUT_SECONDS (300)
+        assert client_kwargs["timeout"] == 10000
 
     def test_influxdb_client_has_timeout(self, monkeypatch):
         mod = _import_fresh()
@@ -407,7 +417,7 @@ class TestCloudflarePublish:
 
         assert calls[0]["check"] is True
 
-    def test_publish_has_timeout(self, monkeypatch, tmp_path):
+    def test_publish_has_deploy_timeout(self, monkeypatch, tmp_path):
         mod = _import_fresh()
 
         site_dir = tmp_path / "site"
@@ -420,7 +430,23 @@ class TestCloudflarePublish:
         data = {"temperature": 22.5, "time": "t", "device_id": "d", "updated_at": "u"}
         mod.publish(data)
 
-        assert calls[0]["timeout"] == 30
+        assert calls[0]["timeout"] == 120
+
+    def test_custom_deploy_timeout(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("DEPLOY_TIMEOUT_SECONDS", "60")
+        mod = _import_fresh()
+
+        site_dir = tmp_path / "site"
+        site_dir.mkdir()
+        monkeypatch.setattr(mod, "SITE_DIR", site_dir)
+
+        calls = []
+        monkeypatch.setattr(subprocess, "run", lambda *a, **kw: calls.append(kw))
+
+        data = {"temperature": 22.5, "time": "t", "device_id": "d", "updated_at": "u"}
+        mod.publish(data)
+
+        assert calls[0]["timeout"] == 60
 
     def test_no_ssh_scp_calls(self, monkeypatch, tmp_path):
         mod = _import_fresh()
@@ -490,3 +516,59 @@ class TestCloudflareEnvVars:
     def test_module_exposes_cloudflare_project_name(self):
         mod = _import_fresh()
         assert mod.CLOUDFLARE_PROJECT_NAME == "temperature"
+
+
+# ---------------------------------------------------------------------------
+# T-009: Exception handling in main()
+# ---------------------------------------------------------------------------
+
+class TestExceptionHandling:
+    """T-009: Verify main() catches and logs exceptions before exiting."""
+
+    def test_deploy_failure_logs_error(self, monkeypatch, caplog, tmp_path):
+        import logging
+        mod = _import_fresh()
+
+        site_dir = tmp_path / "site"
+        site_dir.mkdir()
+        monkeypatch.setattr(mod, "SITE_DIR", site_dir)
+
+        mock_record = MagicMock()
+        mock_record.get_value.return_value = 22.5
+        mock_record.get_time.return_value = datetime(2026, 5, 2, tzinfo=timezone.utc)
+        mock_table = MagicMock()
+        mock_table.records = [mock_record]
+        mock_query_api = MagicMock()
+        mock_query_api.query.return_value = [mock_table]
+        mock_client = MagicMock()
+        mock_client.query_api.return_value = mock_query_api
+        monkeypatch.setattr(mod, "InfluxDBClient", lambda **kw: mock_client)
+
+        def mock_run(*a, **kw):
+            raise subprocess.CalledProcessError(1, "wrangler")
+
+        monkeypatch.setattr(subprocess, "run", mock_run)
+
+        with caplog.at_level(logging.ERROR):
+            with pytest.raises(SystemExit) as exc_info:
+                mod.main()
+
+        assert exc_info.value.code == 1
+        assert "Deploy failed" in caplog.text
+
+    def test_unexpected_error_logs_with_traceback(self, monkeypatch, caplog):
+        import logging
+        mod = _import_fresh()
+
+        def exploding_client(**kw):
+            raise ConnectionError("connection refused")
+
+        monkeypatch.setattr(mod, "InfluxDBClient", exploding_client)
+
+        with caplog.at_level(logging.ERROR):
+            with pytest.raises(SystemExit) as exc_info:
+                mod.main()
+
+        assert exc_info.value.code == 1
+        assert "Failed" in caplog.text
+        assert "connection refused" in caplog.text
