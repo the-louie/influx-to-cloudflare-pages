@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Fetch latest temperature from InfluxDB and publish to Cloudflare Pages."""
 
+import glob
 import json
 import logging
 import math
@@ -8,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -165,10 +167,15 @@ def generate_og_image(data):
         text_w = bbox[2] - bbox[0]
         draw.text(((width - text_w) / 2, temp_y + text_h + 20), date_text, fill=white, font=font_date)
 
-    img.save(SITE_DIR / "og-image.png")
+    # Remove old OG images and save with a unique name to bust social media caches
+    for old in glob.glob(str(SITE_DIR / "og-*.png")):
+        os.remove(old)
+    og_filename = f"og-{uuid.uuid4().hex[:12]}.png"
+    img.save(SITE_DIR / og_filename)
+    return og_filename
 
 
-def _update_og_meta(data):
+def _update_og_meta(data, og_filename):
     """Rewrite the OG meta tags in index.html with absolute URLs and current data."""
     index_path = SITE_DIR / "index.html"
     html = index_path.read_text()
@@ -177,7 +184,7 @@ def _update_og_meta(data):
     device = data["device_id"]
     og_title = f"{temp}°C — {device} Temperature"
     og_desc = f"Current reading: {temp}°C from sensor {device}. Live temperature display updated automatically."
-    og_image = f"{SITE_URL}/og-image.png"
+    og_image = f"{SITE_URL}/{og_filename}"
 
     og_block = f"""    <!-- OG_META_START -->
     <meta property="og:title" content="{og_title}">
@@ -204,8 +211,8 @@ def _update_og_meta(data):
 
 
 def publish(data):
-    generate_og_image(data)
-    _update_og_meta(data)
+    og_filename = generate_og_image(data)
+    _update_og_meta(data, og_filename)
     # Write temperature.json into the site directory
     json_path = SITE_DIR / "temperature.json"
     with open(json_path, "w") as f:
