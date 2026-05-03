@@ -141,6 +141,14 @@ Override the default timeout (in seconds) for network calls to InfluxDB and Clou
 - Only needed if you experience slow or unreliable connections
 - Applies to the InfluxDB query and the Wrangler deployment subprocess
 
+### `DEPLOY_TIMEOUT_SECONDS`
+
+Override the default timeout (in seconds) for the Wrangler deploy subprocess.
+
+- Default: `120`
+- Cloudflare Pages deployments involve uploading files and waiting for edge propagation, which can take longer than a simple database query
+- Increase if you experience timeouts during deployment on slow connections
+
 ### `TEMP_MIN` / `TEMP_MAX`
 
 Sanity-check bounds for temperature values. If a reading falls outside this range, a warning is logged but the value is still published.
