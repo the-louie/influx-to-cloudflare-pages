@@ -268,6 +268,32 @@
 
 ---
 
+### T-019: Add developer workflow and Docker instructions to README
+
+**Context:** The README currently covers quick start and cron setup for operators, but has no guidance for developers contributing to the project. It also lacks Docker instructions even though T-016 plans Docker packaging. Developers need to know how to set up a dev environment, run tests, modify the HTML page, rebuild the Docker image, and deploy changes.
+
+**Requirements:**
+- [ ] Add a "Development" section to `README.md` after "Running Tests" with:
+  - How to set up a local dev environment (clone, venv, install deps, copy .env)
+  - How to preview the page locally: `cd site && python3 -m http.server 8000` with a sample `temperature.json`
+  - How to run the test suite and what to expect (number of tests, what they cover)
+  - How to add a new test: which file, naming conventions, the `_import_fresh()` pattern explained
+  - How to modify `site/index.html` and verify changes locally before deploying
+- [ ] Add a "Docker" section to `README.md` after "Cron Setup" with:
+  - How to build: `docker compose build`
+  - How to run once: `docker compose run --rm publisher`
+  - How to run via cron: `*/5 * * * * cd /path/to/project && docker compose run --rm publisher >> /var/log/temperature.log 2>&1`
+  - How to rebuild after code changes: `docker compose build --no-cache`
+  - Note that `.env` is read via `env_file` in `docker-compose.yml`, not baked into the image
+  - Note that `site/` is volume-mounted so `temperature.json` and `og-image.png` are visible on the host for debugging
+- [ ] Update the "Project Structure" tree to include new files: `site/_headers`, `Dockerfile`, `docker-compose.yml`, `.dockerignore`
+- [ ] Update the "Dependencies" section to mention Pillow and Docker as optional
+- [ ] Update the test count from 35 to the current number (39)
+
+**Estimated Effort:** 1h
+
+---
+
 ## Completed (archived)
 
 All original tickets T-001 through T-008 have been implemented, tested, and committed. The following is a summary for reference:
@@ -289,6 +315,6 @@ All original tickets T-001 through T-008 have been implemented, tested, and comm
 
 ## Stats
 
-- **Open tickets:** 8 (2 manual QA, 4 hardening/security, 1 packaging, 1 feature)
+- **Open tickets:** 9 (2 manual QA, 4 hardening/security, 1 packaging, 1 feature, 1 documentation)
 - **Completed tickets:** 13 (T-001 through T-010)
-- **Estimated remaining effort:** 10h
+- **Estimated remaining effort:** 11h
