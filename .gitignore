@@ -5,3 +5,4 @@ __pycache__/
 .claude/
 .wrangler/
 site/temperature.json
+site/og-image.png

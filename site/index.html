@@ -4,6 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Temperature</title>
+    <meta property="og:title" content="Temperature">
+    <meta property="og:description" content="Current temperature reading">
+    <meta property="og:type" content="website">
+    <meta property="og:image" content="og-image.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Temperature">
+    <meta name="twitter:description" content="Current temperature reading">
+    <meta name="twitter:image" content="og-image.png">
     <style>
         * {
             margin: 0;
@@ -86,7 +96,7 @@
         }
 
         function fetchTemperature() {
-            fetch('temperature.json')
+            fetch('temperature.json?t=' + Date.now())
                 .then(function (response) {
                     if (!response.ok) throw new Error('HTTP ' + response.status);
                     return response.json();
