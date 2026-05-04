@@ -287,8 +287,10 @@ def generate_og_image(data):
         font_small = ImageFont.load_default()
         font_date = ImageFont.load_default()
 
-    # Draw device ID label above temperature
-    device_text = data.get("device_id", "")
+    # Draw device label above temperature. Prefer the pretty-printed
+    # form (T-023) and fall back to the raw machine identifier if a
+    # caller passes a payload that predates device_name.
+    device_text = data.get("device_name") or data.get("device_id", "")
     bbox = draw.textbbox((0, 0), device_text, font=font_small)
     text_w = bbox[2] - bbox[0]
     draw.text(((width - text_w) / 2, 130), device_text, fill=white, font=font_small)
