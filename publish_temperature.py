@@ -329,7 +329,11 @@ def _update_og_meta(data, og_filename):
     html = index_path.read_text()
 
     temp = data["temperature"]
-    device = data["device_id"]
+    # T-023: prefer the pretty-printed display form for human-facing
+    # surfaces (OG title, OG description, Twitter card). The raw
+    # device_id stays in the JSON so machine consumers (dashboards,
+    # external integrations) keep a stable identifier.
+    device = data.get("device_name") or data["device_id"]
     og_title = f"{temp}°C — {device} Temperature"
     og_desc = f"Current reading: {temp}°C from sensor {device}. Live temperature display updated automatically."
     og_image = f"{SITE_URL}/{og_filename}"
