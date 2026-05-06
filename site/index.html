@@ -107,7 +107,10 @@
         }
 
         function updateDisplay(data) {
-            document.getElementById('device-id').textContent = data.device_id || '';
+            // T-023: prefer the pretty-printed display name. Fallback
+            // to the raw device_id covers older cached JSON payloads
+            // still served from the Cloudflare edge during rollout.
+            document.getElementById('device-id').textContent = data.device_name || data.device_id || '';
             document.getElementById('temperature').textContent = data.temperature;
             document.getElementById('min-36h').textContent = formatAggregate(data.min_36h);
             document.getElementById('max-36h').textContent = formatAggregate(data.max_36h);
