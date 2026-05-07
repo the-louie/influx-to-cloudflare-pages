@@ -427,6 +427,59 @@ class TestMinMax36h:
 
 
 # ---------------------------------------------------------------------------
+# T-023: Pretty-print sensor name
+# ---------------------------------------------------------------------------
+
+class TestPrettyDeviceName:
+    """T-023: Verify the device-name display transform and JSON shape."""
+
+    @pytest.mark.parametrize("raw,pretty", [
+        ("gisebo-01", "Gisebo 01"),
+        ("living_room", "Living room"),
+        ("temp-sensor_kitchen", "Temp sensor kitchen"),
+        ("Foo-Bar", "Foo Bar"),  # case beyond the first char preserved
+        ("", ""),
+        ("a", "A"),
+        ("x_y_z", "X y z"),
+        ("123-abc", "123 abc"),  # leading digit: upper() is a no-op, dash still becomes space
+    ], ids=[
+        "hyphen-and-digits",
+        "underscore",
+        "mixed-separators",
+        "case-preserved-past-first",
+        "empty-string",
+        "single-character",
+        "multiple-underscores",
+        "leading-digit",
+    ])
+    def test_pretty_device_name(self, raw, pretty):
+        mod = _import_fresh()
+        assert mod._pretty_device_name(raw) == pretty
+
+    def test_fetch_returns_device_name_alongside_device_id(self, monkeypatch):
+        # The raw device_id must stay in the payload (machine
+        # consumers depend on it as a stable identifier), and the
+        # new device_name must be the pretty-printed form.
+        mod = _import_fresh()
+        record = MagicMock()
+        record.get_value.return_value = 22.5
+        record.get_time.return_value = datetime(2026, 5, 2, tzinfo=timezone.utc)
+        record.values = {"result": "last"}
+        table = MagicMock()
+        table.records = [record]
+        table.get_group_key.return_value = {"result": "last"}
+        api = MagicMock()
+        api.query.return_value = [table]
+        client = MagicMock()
+        client.query_api.return_value = api
+        monkeypatch.setattr(mod, "InfluxDBClient", lambda **kw: client)
+
+        result = mod.fetch_temperature()
+        assert result["device_id"] == "gisebo-01"
+        assert result["device_name"] == "Gisebo 01"
+
+
+# ---------------------------------------------------------------------------
 # T-005b: Structured logging
 # ---------------------------------------------------------------------------
 
