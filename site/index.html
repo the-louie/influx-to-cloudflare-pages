@@ -83,7 +83,7 @@
         <span id="temperature">--</span><span class="unit">&deg;C</span>
     </div>
     <div id="min-max">
-        <span id="min-36h">--</span> / <span id="max-36h">--</span> &deg;C (36h)
+        <span id="min-36h">Min: --</span> / <span id="max-36h">Max: --</span> &deg;C
     </div>
     <div id="updated-at"></div>
 
@@ -112,16 +112,16 @@
             // still served from the Cloudflare edge during rollout.
             document.getElementById('device-id').textContent = data.device_name || data.device_id || '';
             document.getElementById('temperature').textContent = data.temperature;
-            document.getElementById('min-36h').textContent = formatAggregate(data.min_36h);
-            document.getElementById('max-36h').textContent = formatAggregate(data.max_36h);
+            document.getElementById('min-36h').textContent = 'Min: ' + formatAggregate(data.min_36h);
+            document.getElementById('max-36h').textContent = 'Max: ' + formatAggregate(data.max_36h);
             document.getElementById('updated-at').textContent = 'Last updated: ' + formatTimestamp(data.time);
             document.title = data.temperature + '\u00B0C';
         }
 
         function showError() {
             document.getElementById('temperature').textContent = '--';
-            document.getElementById('min-36h').textContent = '--';
-            document.getElementById('max-36h').textContent = '--';
+            document.getElementById('min-36h').textContent = 'Min: --';
+            document.getElementById('max-36h').textContent = 'Max: --';
             document.getElementById('updated-at').textContent = '...';
             document.title = 'Temperature';
         }
