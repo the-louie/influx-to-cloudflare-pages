@@ -2,333 +2,364 @@
 
 ## Open Items
 
-### T-009: Add exception handling with structured logging in main()
+### T-011: Manual QA for the deployed page (refreshed scope)
 
-**Context:** T-005b specified "Log exceptions from `subprocess.CalledProcessError` and `InfluxDBClient` failures at `logging.error` level," and the checkbox was marked complete, but this was never implemented. Currently in `publish_temperature.py`, if the Wrangler deploy fails (`subprocess.CalledProcessError`) or the InfluxDB client throws, the raw traceback goes to stderr with no structured log entry. Under cron, this traceback may be lost entirely.
+**Context:** `site/index.html` has accumulated several rendering surfaces that have never been visually verified in a browser: the original temperature display, the new 36h min/max line under the temperature, the pretty-printed device name in `#device-id` (e.g. `Gisebo 01` instead of `gisebo-01`), the dynamically-generated OG image at `site/og-<uuid>.png`, the OG/Twitter meta block, and the cache-busting fetch with `?t=Date.now()`. All have unit-test or static-validation coverage but none have a human-in-a-browser sign-off.
 
 **Requirements:**
-- [x] In `main()` in `publish_temperature.py` (line 122), wrap the `fetch_temperature()` and `publish(data)` calls in a `try/except` block
-- [x] Catch `subprocess.CalledProcessError` and log with `logging.error(f"Deploy failed: {e}")`
-- [x] Catch `Exception` broadly as a fallback and log with `logging.error(f"Unexpected error: {e}", exc_info=True)`
-- [x] Re-raise or `sys.exit(1)` after logging so the cron job still reports a non-zero exit code
-
-**Testing:**
-- [x] In `test_publish_temperature.py`, monkeypatch `subprocess.run` to raise `CalledProcessError`, call `main()`, assert log contains "Deploy failed" at ERROR level
-- [x] Monkeypatch `InfluxDBClient` to raise `ConnectionError`, call `main()`, assert log contains "Unexpected error" at ERROR level
-- [x] Assert `sys.exit(1)` is called in both cases
+- Use the live `site/temperature.json` (or overwrite with a sample like `{"device_id":"gisebo-01","device_name":"Gisebo 01","temperature":22.5,"time":"2026-05-10T12:00:00+00:00","min_36h":18.0,"max_36h":27.3,"updated_at":"2026-05-10T12:00:01+00:00"}`)
+- Serve locally: `cd site && python3 -m http.server 8000`
+- In a desktop Chromium-family browser at `http://localhost:8000`, confirm: light blue (`#90c0de`) background, pretty-printed device name in `#device-id` above the temperature, large `#1c7bb7` temperature with `°C`, the new `<min> / <max> °C (36h)` line under the temperature in smaller white text, "Last updated" timestamp at the bottom, browser tab title equals `<temp>°C`
+- Toggle DevTools mobile viewport (iPhone SE, Pixel 7), confirm `clamp()`-based font sizing scales without overflowing
+- DevTools Network tab: confirm `temperature.json?t=<timestamp>` fires every 60s with a different `t=` value each time
+- Rename `site/temperature.json`, wait 60s, confirm the page falls back to `--` for temperature, min, max, and the timestamp goes to `...`. Restore the file, confirm recovery within 60s
+- Open the current `site/og-*.png` directly, confirm 1200×630 dimensions, pretty device label centred, temperature in big text, date below
+- Validate the served HTML at https://validator.w3.org/nu/#textarea
+- After the next production deploy, paste the public URL into https://www.opengraph.xyz/, confirm the preview shows the pretty device name in the title and the latest OG image renders
 
 **Estimated Effort:** 1h
 
 ---
 
-### T-010: Increase default timeout for Wrangler deploy
+### T-012: Walk through SETUP.md and Docker quick-start on a fresh checkout
 
-**Context:** `TIMEOUT_SECONDS` (default 30) is shared between the InfluxDB query and the Wrangler deploy subprocess. A Cloudflare Pages deployment involves uploading files and waiting for edge propagation, which can exceed 30 seconds on slow connections or during Cloudflare incidents. The InfluxDB query, by contrast, should complete in under a second.
+**Context:** `SETUP.md` was authored before Docker packaging and several env-var additions (`DEPLOY_TIMEOUT_SECONDS`, `SITE_URL`, `TEMP_MIN`, `TEMP_MAX`, `QUERY_RANGE`). The Docker path (`Dockerfile`, `docker-compose.yml`) is the recommended deployment but `SETUP.md` does not reference it. A new operator following SETUP.md alone will miss the Docker shape entirely.
 
 **Requirements:**
-- [x] In `publish_temperature.py`, add a separate `DEPLOY_TIMEOUT_SECONDS = int(os.environ.get("DEPLOY_TIMEOUT_SECONDS", "120"))` on the line after `TIMEOUT_SECONDS`
-- [x] Change the `timeout=` kwarg in the Wrangler `subprocess.run` call (line 118) from `TIMEOUT_SECONDS` to `DEPLOY_TIMEOUT_SECONDS`
-- [x] Keep `TIMEOUT_SECONDS` for the InfluxDB client timeout (line 72), it remains appropriate there
-- [x] Add `# DEPLOY_TIMEOUT_SECONDS=120` to `.env.example` under the existing timeout comment
-- [x] Add a `DEPLOY_TIMEOUT_SECONDS` entry to section 4 of `SETUP.md`
-
-**Testing:**
-- [x] In `test_publish_temperature.py`, monkeypatch `subprocess.run`, call `publish()`, assert timeout is 120 (not 30)
-- [x] Set `DEPLOY_TIMEOUT_SECONDS=60` in env, reimport, call `publish()`, assert timeout is 60
-- [x] Assert InfluxDB client timeout remains `TIMEOUT_SECONDS * 1000` (unchanged)
+- Clone the repo into a fresh directory on a machine with no prior project state
+- Walk through SETUP.md from `cp .env.example .env` to a successful publish via the bare-metal path: `python -m venv .venv`, `source .venv/bin/activate`, `pip install -r requirements.txt`, populate `.env` with real credentials, `python publish_temperature.py`. Confirm a temperature value lands at the deployed Pages URL within 5 minutes
+- Repeat via the Docker path: `docker compose build`, `docker compose run --rm publisher`. Confirm same outcome. Also confirm `docker history` and `docker run --rm <image> env` do not contain any token values
+- Diff `.env.example` env vars against SETUP.md sections: every variable in `.env.example` must be documented somewhere in SETUP.md. Currently `QUERY_RANGE` is documented (added in section 4). Verify the others
+- Add a short `## Docker quick-start` section near the top of `SETUP.md` that points operators at the README Docker section
+- Confirm InfluxDB token-creation and Cloudflare API-token-scope screenshots/menu paths still match the current dashboards, fix any drift
+- Commit fixes in the same PR
 
 **Estimated Effort:** 1h
 
 ---
 
-### T-011: Manual QA for temperature display page
+### T-024: Escape interpolated values in `_update_og_meta`
 
-**Context:** The `site/index.html` page was built and committed but never visually tested in a browser. All code-level requirements are met per automated tests, but layout, responsiveness, and usability need manual verification.
+**Context:** `_update_og_meta()` in `publish_temperature.py` interpolates `data["temperature"]`, `data["device_name"]`, and `data["device_id"]` (via the device-name fallback chain) directly into HTML attribute values inside the OG/Twitter meta block. There is no escaping. The values originate in InfluxDB or operator-controlled `.env`, so the threat model is "operator self-foot-gun" or "anyone with InfluxDB write access", not external network input. The CSP at `site/_headers` would block any inline script execution at runtime, but malformed meta tags can still confuse social-media crawlers and break the OG preview entirely.
 
-**Requirements:**
-- [ ] Create a sample `site/temperature.json` with realistic test data:
-  ```json
-  {"device_id":"gisebo-01","temperature":22.5,"time":"2026-05-02T12:00:00+00:00","updated_at":"2026-05-02T12:00:01+00:00"}
-  ```
-- [ ] Serve the site locally: `cd site && python3 -m http.server 8000`
-- [ ] Open `http://localhost:8000` in a desktop browser and verify:
-  - Light blue background (`#90c0de`)
-  - Device ID label visible above temperature
-  - Temperature displayed large, centered, with °C suffix
-  - "Last updated" timestamp visible below
-- [ ] Open Chrome DevTools, toggle mobile viewport (iPhone SE, Pixel 7), verify responsive font sizing works via `clamp()`
-- [ ] Delete `temperature.json` while page is open, wait 60 seconds, verify page shows "--" fallback
-- [ ] Validate HTML at https://validator.w3.org by pasting the source
-
-**Estimated Effort:** 30min
-
----
-
-### T-012: Verify SETUP.md accuracy on a fresh checkout
-
-**Context:** `SETUP.md` was written based on known UI paths in InfluxDB and Cloudflare, but the instructions were never followed end-to-end on a fresh machine. Menu paths or UI labels may have changed.
+A `device_name` derived from a `DEVICE_ID` containing `"><script>alert(1)</script>` would currently produce a structurally-broken `<meta>` tag.
 
 **Requirements:**
-- [ ] Clone the repo to a clean directory (or use a fresh virtual environment)
-- [ ] Follow every step in `SETUP.md` from `cp .env.example .env` through running the script
-- [ ] Verify every env var in `.env.example` has a matching entry in `SETUP.md`
-- [ ] Fix any incorrect UI paths, missing steps, or unclear instructions found during the walkthrough
-
-**Estimated Effort:** 1h
-
----
-
-### T-013: Move TEMP_MIN/TEMP_MAX parsing to module level and validate
-
-**Context:** Found during code review (see `__doc/code_reviews/20260503-0900_full_codebase_review.md`). Lines 88-89 of `publish_temperature.py` parse `TEMP_MIN` and `TEMP_MAX` from environment on every `fetch_temperature()` call. If a non-integer value is set (e.g. `TEMP_MIN=abc`), it raises `ValueError` on every cron run with a confusing "Failed: invalid literal for int()" message. The same issue applies to `TIMEOUT_SECONDS` and `DEPLOY_TIMEOUT_SECONDS` on lines 48-49.
-
-**Requirements:**
-- [ ] Move `temp_min` and `temp_max` parsing to module level, below `DEPLOY_TIMEOUT_SECONDS`
-- [ ] Wrap all `int()` conversions for optional env vars in a helper or try/except that produces a clear error naming the variable
-- [ ] Remove the `int()` calls from inside `fetch_temperature()`
+- In `publish_temperature.py`, in `_update_og_meta()` (around line 184 in the current file), wrap the four interpolated values (`og_title`, `og_desc`, both occurrences of `og_image`) in `html.escape(value, quote=True)` before they enter the f-string template
+- `from html import escape` near the top of the module if not already imported (check the import block)
+- Confirm the resulting attribute values still render correctly for normal inputs (`Gisebo 01`, `22.5`)
 
 **Testing:**
-- [ ] Set `TEMP_MIN=abc` in env, import module, assert clear error message mentioning `TEMP_MIN`
-- [ ] Set `TIMEOUT_SECONDS=fast`, assert clear error message mentioning `TIMEOUT_SECONDS`
+- In `test_publish_temperature.py`, add a test that calls `_update_og_meta()` with `data["device_name"] = 'Foo"><script>alert(1)</script>'`, reads the rewritten `index.html`, and asserts: the `<meta>` tags are still well-formed (count tags via a simple parser), the literal `<script` substring is absent from inside any `content="..."` attribute, the dangerous chars appear escaped (`&quot;`, `&gt;`, `&lt;`)
+- Add a test that the normal happy-path output is unchanged for an ASCII device name (regression guard)
 
-**Estimated Effort:** 1h
-
----
-
-### T-014: Validate SITE_DIR exists at startup
-
-**Context:** Found during code review. `SITE_DIR` on line 51 of `publish_temperature.py` assumes the `site/` directory exists relative to the script. If invoked from an unexpected location or if `site/` was deleted, `publish()` raises `FileNotFoundError` with no helpful context.
-
-**Requirements:**
-- [ ] After `SITE_DIR` is defined (line 51), add a check: if `not SITE_DIR.is_dir()`, log an error and `sys.exit(1)`
-- [ ] The error message should include the resolved path so the operator knows where to look
-
-**Testing:**
-- [ ] Monkeypatch `SITE_DIR` to a non-existent path, import module, assert `sys.exit(1)` and error message contains the path
-
-**Estimated Effort:** 30min
+**Estimated Effort:** 45min
 
 ---
 
-### T-015: Add Cloudflare CDN cache busting for temperature.json
+### T-025: Reconcile CLAUDE.md drift about Flux query parameterization
 
-**Context:** Found during code review. The `index.html` fetches `temperature.json` every 60 seconds, but Cloudflare's CDN may serve a stale cached version. There is no cache-busting query parameter and no `Cache-Control` header configuration. This means the page could show stale temperature data even after a fresh deploy.
+**Context:** `CLAUDE.md` lines 7 and 31 both claim the project uses "parameterized Flux queries", but the actual code at `publish_temperature.py:200-228` uses f-string interpolation with `_validate_flux_value` allowlists and the `_parse_duration_env` regex validator. The drift was flagged during the T-021b review and during the T-021b commit message but never fixed. The wording misleads new contributors and any AI agent that reads CLAUDE.md as ground truth.
 
 **Requirements:**
-- [ ] Option A: In `index.html`, append a timestamp query parameter to the fetch URL: `'temperature.json?t=' + Date.now()`
-- [ ] Option B: Create a `site/_headers` file with `Cache-Control: no-cache` for `temperature.json` (Cloudflare Pages supports this)
-- [ ] Choose one approach and implement it
+- In `CLAUDE.md`, change "Source: InfluxDB 2.x with parameterized Flux queries" (line 7) to something like "Source: InfluxDB 2.x with validated f-string Flux queries (allowlist-based input validation, see `_validate_flux_value` and `_parse_duration_env` in `publish_temperature.py`)"
+- Same correction in the Project Conventions section (line 34): change "Python script using `influxdb-client` library with parameterized queries" to "Python script using `influxdb-client` library with validated f-string queries"
+- The Flux query example at lines 22-29 still uses `params.measurement` style. Either update it to show the actual f-string form, or add a one-line note above it stating it is illustrative pseudocode, not the literal source
 
-**Testing:**
-- [ ] If Option A: verify the fetch URL in `index.html` includes a query parameter
-- [ ] If Option B: verify `site/_headers` exists and contains the correct rule
-- [ ] Deploy and confirm the JSON file is not stale after update
-
-**Estimated Effort:** 30min
+**Estimated Effort:** 15min
 
 ---
 
-### T-016: Package as Docker container with docker-compose.yml
+### T-026: Run the deferred security audit
 
-**Context:** The project currently requires manual setup of Python, Node.js/npx, and pip dependencies. Packaging it as a Docker container makes deployment reproducible and simplifies cron setup on any host. The container needs both Python (for the script) and Node.js (for `npx wrangler`).
+**Context:** A structured hostile-attacker security audit was scoped earlier in the project but never executed. The intended deliverables: a `SECURITY_FLOW_TRACKER.md` enumerating every code path that handles untrusted input, secret material, or external system interaction, plus one `[REMEDIATION TASK: SEC-NNN]` entry per finding using the same shape as SEC-001 and SEC-002 in this file.
+
+The seven flow areas to attack: (1) configuration and startup, (2) InfluxDB query construction, (3) static site generation including the OG image race window and the unescaped HTML rewrite (which T-024 partially addresses), (4) Cloudflare Pages deploy subprocess, (5) edge-served headers and CORS, (6) container runtime and image layers, (7) logging and operational hygiene including verifying SEC-001/SEC-002 rotation status.
+
+This work should be claimed by a developer using the `/security-review` skill or a dedicated subagent briefed with this ticket.
 
 **Requirements:**
-- [ ] Create a `Dockerfile` in the project root:
-  - Use `python:3.11-slim` as the base image
-  - Install Node.js (via `apt-get install -y nodejs npm` or use a multi-stage build with `node:20-slim`)
-  - Copy `requirements.txt` and run `pip install --no-cache-dir -r requirements.txt`
-  - Copy `publish_temperature.py` and the `site/` directory into the image
-  - Set the working directory to `/app`
-  - Default command: `python publish_temperature.py`
-  - Do NOT copy `.env` into the image (secrets must not be baked into the image)
-- [ ] Create a `docker-compose.yml` in the project root:
-  ```yaml
-  services:
-    publisher:
-      build: .
-      env_file:
-        - .env
-      volumes:
-        - ./site:/app/site
-  ```
-  - The `env_file` directive reads all variables from `.env` automatically, no changes needed to the Python code since `os.environ` sees them
-  - The volume mount for `site/` ensures `temperature.json` is written to the host (optional, useful for debugging)
-- [ ] Add a `.dockerignore` file to exclude `.env`, `.venv/`, `__pycache__/`, `.git/`, `__doc/`, `*.pyc`, and `test_publish_temperature.py` from the build context
-- [ ] Verify the container runs correctly: `docker compose up --build`
-- [ ] Verify the container exits cleanly with code 0 on success and code 1 on failure
-- [ ] Document the Docker usage in `README.md`:
-  - `docker compose up --build` for a single run
-  - Cron example: `*/5 * * * * cd /path/to/project && docker compose up --build 2>&1 >> /var/log/temperature.log`
-  - Or use `docker compose up -d` with `restart: "no"` and an external cron/systemd timer
-- [ ] Note on `npx wrangler`: the first run inside the container will download Wrangler since it is not globally installed. To speed up repeated runs, either `RUN npm install -g wrangler` in the Dockerfile, or use a named volume for the npm cache
+- Create `/workspace/SECURITY_FLOW_TRACKER.md` with a checkbox for each of the seven flow areas
+- Walk each area, brainstorming injection, race conditions, broken validation, side effects, and supply-chain risks
+- For each finding, append a `[REMEDIATION TASK: SEC-NNN]` block to the `## Security Remediation` section of this file (numbering continues from SEC-002), include a `Reproduction:` subsection with the exact crafted input that triggers the flaw
+- Flip each tracker checkbox to `[x]` after the area is fully attacked
+- Update SEC-001 and SEC-002 status if the tokens have been rotated in the meantime
 
-**Testing:**
-- [ ] `docker compose build` succeeds without errors
-- [ ] `docker compose run --rm publisher` with a valid `.env` fetches data and deploys (or logs the expected error if InfluxDB/Cloudflare are unreachable)
-- [ ] `docker compose run --rm publisher` without `.env` exits with code 1 and prints the missing variables message
-- [ ] Verify no secrets are in the built image: `docker history <image>` and `docker run --rm <image> env` should not contain tokens
-
-**Estimated Effort:** 1-2h
+**Estimated Effort:** 4-6h, splittable per flow area
 
 ---
 
-### T-017: Add OpenGraph meta tags and generate dynamic OG image
+## Security Remediation (urgent)
 
-**Context:** When the page URL is shared on social media, messaging apps, or link previews, there are no OpenGraph tags, so it shows a blank or generic preview. The page should include full OG meta tags and a dynamically generated image that displays the current temperature in the same visual style as the web page (light blue background, large bold number).
+The following entries were generated by an automated secret scan of `/workspace/.env` on 2026-05-10. The file is `.gitignore`d and absent from git history (verified via `git log -S` for both token prefixes), so the leak surface is local filesystem only. The risk is one accidental `git add -f .env` away from a public-repository leak, plus the fact that anyone with shell access to the publishing host can read the live tokens. Rotation is still warranted.
 
-**Requirements:**
-- [ ] Add the following OpenGraph meta tags to `<head>` in `site/index.html`:
-  ```html
-  <meta property="og:title" content="Temperature">
-  <meta property="og:description" content="Current temperature reading">
-  <meta property="og:type" content="website">
-  <meta property="og:image" content="og-image.png">
-  <meta property="og:image:width" content="1200">
-  <meta property="og:image:height" content="630">
-  ```
-  Also add Twitter Card tags for broader compatibility:
-  ```html
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Temperature">
-  <meta name="twitter:description" content="Current temperature reading">
-  <meta name="twitter:image" content="og-image.png">
-  ```
-- [ ] Generate `site/og-image.png` (1200x630px) in `publish_temperature.py` using the Pillow library:
-  - Add `Pillow` to `requirements.txt` (pin to current version)
-  - Background: `#90c0de` (same light blue as the page)
-  - Temperature value centered, bold, large font (~200px), color `#1c7bb7`
-  - Include `°C` suffix at the same size as the number
-  - Device ID label above in smaller white text (~40px), color `rgba(255,255,255,0.7)` approximated as `#ffffffb3` or `(255,255,255,178)`
-  - Use a bundled font: include `Arial` or a free alternative like `DejaVu Sans` (available on most Linux systems at `/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf`), or bundle a `.ttf` in the repo under `fonts/`
-  - Generate the image in `publish()` before the Wrangler deploy, so it is included in the deployed site
-- [ ] The OG image must be regenerated on every publish run so it always shows the current temperature
-- [ ] Update the JS in `index.html` to also update the `og:description` meta tag content with the current temperature value (note: this only affects in-page reads, crawlers see the static HTML)
+[REMEDIATION TASK: SEC-001]
+- Status: TODO
+- Location: `/workspace/.env` at Line `3`
+- Secret Type: InfluxDB v2 API Token (89-char base64 with `==` padding, prefix `Jv6KW9wB...`, suffix `...Fd-g==`)
+- Risk Level: Critical
+- Required Action:
+    1. Revoke the secret immediately at the InfluxDB UI: Load Data > API Tokens > select the token > Delete
+    2. Generate a replacement token with the same scope (read-only on `home_assistant` bucket)
+    3. Update `INFLUXDB_TOKEN` in `.env` on every host that runs `publish_temperature.py` (production cron host, any operator workstations)
+    4. Confirm `git log --all -p -S "Jv6KW9wB"` returns empty, run BFG Repo-Cleaner or `git filter-repo` only if it does not (precaution, not currently required)
 
-**Testing:**
-- [ ] Run the script, verify `site/og-image.png` is created with correct dimensions (1200x630)
-- [ ] Open the image, verify it shows the temperature value on the light blue background
-- [ ] Paste the deployed URL into https://www.opengraph.xyz/ or the Facebook Sharing Debugger and verify the preview shows the OG image and correct title/description
-- [ ] Add `site/og-image.png` to `.gitignore` (it is a generated artifact like `temperature.json`)
+[REMEDIATION TASK: SEC-002]
+- Status: TODO
+- Location: `/workspace/.env` at Line `14`
+- Secret Type: Cloudflare API Token (`cfut_` prefix, prefix `cfut_mqE0...`, suffix `...3dba`)
+- Risk Level: Critical
+- Required Action:
+    1. Revoke the secret immediately at the Cloudflare dashboard: My Profile > API Tokens > select > Roll or Delete
+    2. Generate a replacement token with the same scope (`Account: Cloudflare Pages: Edit`)
+    3. Update `CLOUDFLARE_API_TOKEN` in `.env` on every host that runs `publish_temperature.py`
+    4. Confirm `git log --all -p -S "cfut_mqE0"` returns empty, run BFG Repo-Cleaner or `git filter-repo` only if it does not (precaution, not currently required)
 
-**Estimated Effort:** 2h
+[REMEDIATION TASK: SEC-003]
+- Status: TODO
+- Location: `/workspace/publish_temperature.py` lines 37-43 (`_parse_int_env`) and lines 115-118 (`TIMEOUT_SECONDS`, `DEPLOY_TIMEOUT_SECONDS`, `TEMP_MIN`, `TEMP_MAX`)
+- Vulnerability Type: Missing range validation on integer env vars (logic-level DoS, silent misconfiguration)
+- Risk Level: Medium
+- Required Action:
+    1. Add explicit lower bounds in `_parse_int_env` (or per-call wrappers): `TIMEOUT_SECONDS` and `DEPLOY_TIMEOUT_SECONDS` must be `>= 1` (zero collapses `TIMEOUT_SECONDS * 1000` to no-timeout in the Influx client; negative values are silently accepted today)
+    2. Validate `TEMP_MIN < TEMP_MAX` after both are parsed; exit with a clear error if not, since an inverted range silently makes every reading "out of range" while still publishing
+    3. Add an upper bound (e.g. `<= 86400`) on the timeouts to prevent operator typos from creating multi-day blocking calls
+    4. Cover with tests in `test_publish_temperature.py`: zero, negative, oversized, and inverted-range cases
+- Reproduction:
+    1. `TIMEOUT_SECONDS=0 python publish_temperature.py` -> Influx client receives `timeout=0`, treats it as no timeout, request can hang for the full TCP timeout instead of the operator-specified bound
+    2. `TEMP_MIN=80 TEMP_MAX=-50 python publish_temperature.py` -> every reading logs `Temperature N outside expected range [80, -50]` but is still published; operator only notices via log volume
 
----
+[REMEDIATION TASK: SEC-004]
+- Status: TODO
+- Location: `/workspace/publish_temperature.py` line 113 (`SITE_URL` derivation, no scheme/host validation)
+- Vulnerability Type: Unvalidated URL flows into rewritten OG/Twitter meta tags (open-redirect-style metadata poisoning)
+- Risk Level: Medium
+- Required Action:
+    1. After loading `SITE_URL`, validate scheme is `https://` (or explicitly `http://` for local dev), validate host is not empty, reject embedded credentials (`user:pass@`), reject newlines and control characters
+    2. On failure, exit with a clear error before `_update_og_meta` runs
+    3. Cover with a test that asserts `SITE_URL=javascript:alert(1)` fails fast at startup
+- Reproduction:
+    1. Set `SITE_URL=javascript:alert(1)` in `.env` (or shell env) and run `python publish_temperature.py`
+    2. The script accepts it, generates `og_image = "javascript:alert(1)/og-<uuid>.png"`, and writes the resulting `<meta property="og:image" content="javascript:alert(1)/og-...png">` block into `site/index.html` and pushes it live
+    3. Social-media crawlers and any consumer that follows `og:image` see an attacker-controlled URL
 
-### T-018: Add security headers via Cloudflare Pages _headers file
+[REMEDIATION TASK: SEC-005]
+- Status: TODO
+- Location: `/workspace/publish_temperature.py` lines 131-134 (`_validate_flux_value`) and lines 208-228 (Flux f-string)
+- Vulnerability Type: Insufficient Flux input validation, structural-character injection
+- Risk Level: High (latent: attacker needs `.env` write today, but the validator is the only guard if any future surface accepts these values)
+- Required Action:
+    1. Tighten `_validate_flux_value` to an allowlist (e.g. `^[A-Za-z0-9_.\-]+$`) instead of a two-character denylist
+    2. Apply the same allowlist to `MEASUREMENT`, `FIELD`, `DEVICE_ID` at startup (fail fast in module top-level alongside `REQUIRED_VARS`), not only inside `fetch_temperature()`
+    3. Consider migrating the query to actual `influxdb-client` parameters via `Dialect`/parameterized queries, removing the f-string entirely (also resolves the T-025 docs drift permanently)
+    4. Add tests for newline, paren, pipe, comma, and Flux-operator inputs
+- Reproduction:
+    1. Set `DEVICE_ID=$'foo\nbar'` (literal newline) in the shell environment and run `python publish_temperature.py`. The validator only checks for `"` and `\`, so the newline passes through. The interpolated query gains an extra line that breaks the intended `filter(...)` call boundary and either errors out at parse time or, with the right surrounding context, becomes a different pipeline.
+    2. Set `DEVICE_ID='gisebo-01) |> limit(n: 0'` (no `"` and no `\`, only parens, pipe, colon, space). The validator passes, and the resulting f-string interpolation yields `r["device_id"] == "gisebo-01) |> limit(n: 0"` which is still inside the original quotes, so the immediate impact is just a broken filter that returns zero rows. But the same pattern combined with a future code path that passes these values through a different Flux context (without the surrounding quotes) becomes an actual injection, which is why an allowlist is the correct fix today rather than tomorrow.
 
-**Context:** The site currently serves no security headers. Cloudflare Pages supports a `_headers` file in the site directory that applies custom HTTP response headers to all deployed assets. Since this is a simple static site with inline CSS, inline JS, and a single `fetch()` call to same-origin `temperature.json`, the Content Security Policy can be strict.
+[REMEDIATION TASK: SEC-006]
+- Status: TODO
+- Location: `/workspace/publish_temperature.py` lines 318-320 (`generate_og_image` glob/remove loop)
+- Vulnerability Type: TOCTOU symlink-following on file removal (arbitrary-file-deletion within appuser scope)
+- Risk Level: Medium
+- Required Action:
+    1. Before `os.remove(old)`, call `os.path.islink(old)` and skip (or refuse to run) if true
+    2. Alternatively, use `os.unlink` with `os.lstat` first to confirm it is a regular file owned by the publisher
+    3. Even better: write the new OG image first, then remove only files matching `og-*.png` whose realpath resolves under `SITE_DIR`
+    4. Cover with a test that places a symlink at `site/og-evil.png -> /tmp/canary` and asserts the canary survives the run
+- Reproduction:
+    1. As any user with write access to `site/` (e.g. compromised `appuser` shell, shared host): `ln -s /tmp/canary site/og-attacker.png`
+    2. `touch /tmp/canary`
+    3. Run `python publish_temperature.py`
+    4. The `glob('og-*.png')` returns `site/og-attacker.png`; `os.remove()` follows the symlink and deletes `/tmp/canary`. With path manipulation, any file the publisher UID can write becomes a deletion target
 
-**Requirements:**
-- [ ] Create `site/_headers` with the following content (one rule block applying to all paths):
-  ```
-  /*
-    X-Content-Type-Options: nosniff
-    X-Frame-Options: DENY
-    Referrer-Policy: no-referrer
-    Permissions-Policy: camera=(), microphone=(), geolocation=(), interest-cohort=()
-    Content-Security-Policy: default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'self'; font-src 'none'; frame-ancestors 'none'
-    Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
-    X-DNS-Prefetch-Control: off
-    Cross-Origin-Opener-Policy: same-origin
-    Cross-Origin-Resource-Policy: same-origin
-  ```
-  Header explanations for the team:
-  - `X-Content-Type-Options: nosniff` prevents the browser from guessing MIME types, reducing XSS risk
-  - `X-Frame-Options: DENY` prevents the page from being embedded in iframes (clickjacking protection)
-  - `Referrer-Policy: no-referrer` prevents sending the URL to third parties when following links
-  - `Permissions-Policy` disables browser features the site does not use (camera, mic, location, FLoC)
-  - `Content-Security-Policy` controls which resources the browser is allowed to load:
-    - `default-src 'none'` blocks everything by default
-    - `script-src 'self' 'unsafe-inline'` allows the inline `<script>` in index.html (required since the JS is inline, not a separate file)
-    - `style-src 'self' 'unsafe-inline'` allows the inline `<style>` block
-    - `img-src 'self'` allows same-origin images (needed for og-image.png if T-017 lands)
-    - `connect-src 'self'` allows the `fetch('temperature.json')` call
-    - `frame-ancestors 'none'` reinforces the X-Frame-Options DENY
-  - `Strict-Transport-Security` enforces HTTPS for 1 year with subdomain coverage
-  - `Cross-Origin-Opener-Policy` and `Cross-Origin-Resource-Policy` isolate the page from cross-origin interactions
-- [ ] Add a separate rule for `temperature.json` to prevent caching (also addresses T-015):
-  ```
-  /temperature.json
-    Cache-Control: no-cache, no-store, must-revalidate
-    Access-Control-Allow-Origin: *
-  ```
-  - `no-cache, no-store, must-revalidate` ensures Cloudflare's CDN and the browser always fetch fresh data
-  - `Access-Control-Allow-Origin: *` allows the JSON to be consumed by other tools if needed
-- [ ] The `_headers` file must NOT be in `.gitignore` since it is a static config file, not a generated artifact
-- [ ] Deploy and verify headers are applied
+[REMEDIATION TASK: SEC-007]
+- Status: TODO
+- Location: `/workspace/publish_temperature.py` lines 369-372 (`temperature.json` write)
+- Vulnerability Type: Non-atomic file write, observable partial state
+- Risk Level: Low
+- Required Action:
+    1. Write to `temperature.json.tmp` first, fsync, then `os.replace()` onto `temperature.json`. `os.replace` is atomic on POSIX
+    2. Apply the same pattern to `index.html` rewrite in `_update_og_meta` (lines 329, 362) for consistency
+    3. Optional: also use atomic rename for the OG PNG so the page never loads a half-written PNG between `img.save` finish and the next `_update_og_meta`
+- Reproduction:
+    1. In one shell, run a tight loop: `while true; do curl -s file://$PWD/site/temperature.json | python3 -c 'import sys,json; json.load(sys.stdin)' || echo BROKEN; done`
+    2. In another shell, repeatedly run `python publish_temperature.py`
+    3. Occasionally observe `BROKEN` output, corresponding to a fetch that landed during the open-truncate-write window. The browser-side `fetch().json()` rejects the same way and the page flashes `--`
 
-**Testing:**
-- [ ] Deploy the site with the `_headers` file and verify headers using `curl -I <site-url>`
-- [ ] Verify `X-Content-Type-Options`, `X-Frame-Options`, `Content-Security-Policy`, and `Strict-Transport-Security` are present in the response
-- [ ] Verify `temperature.json` returns `Cache-Control: no-cache, no-store, must-revalidate`
-- [ ] Open the page in Chrome DevTools > Network tab, confirm no CSP violations in the Console
-- [ ] Scan the deployed URL at https://securityheaders.com/ and aim for an A or A+ grade
+[REMEDIATION TASK: SEC-008]
+- Status: TODO
+- Location: `/workspace/publish_temperature.py` line 113 (`SITE_URL.rstrip("/")`) and lines 339, 345-346, 352 (interpolation into OG meta)
+- Vulnerability Type: Path-traversal segments in `SITE_URL` flow unvalidated into OG meta
+- Risk Level: Low (related to SEC-004; filed separately because the fix is path-component validation rather than scheme validation)
+- Required Action:
+    1. Parse `SITE_URL` with `urllib.parse.urlsplit`, reject non-empty `path` (or normalise it via `posixpath.normpath` and reject if it contains `..`), reject non-empty `query`/`fragment`
+    2. Reconstruct from validated components before storing
+    3. Cover with tests for `..`, double-slash, percent-encoded slash inputs
+- Reproduction:
+    1. Set `SITE_URL=https://temperature.pages.dev/../evil` and run `python publish_temperature.py`
+    2. The script only does `.rstrip("/")`, so the value passes through unchanged
+    3. `og_image` becomes `https://temperature.pages.dev/../evil/og-<uuid>.png` and `og:url` becomes `https://temperature.pages.dev/../evil/`
+    4. Some social-media crawlers normalise the path, others follow it literally and miss the OG image entirely; either way the meta block is no longer trustworthy
 
-**Estimated Effort:** 1h
+[REMEDIATION TASK: SEC-009]
+- Status: TODO
+- Location: `/workspace/publish_temperature.py` lines 375-384 (`subprocess.run(["npx", "wrangler", ...])`) and `SETUP.md` bare-metal path
+- Vulnerability Type: Unpinned `npx` resolution (supply-chain), no integrity verification
+- Risk Level: Medium
+- Required Action:
+    1. Bare-metal path: document and require a project-local `package.json` and `package-lock.json` pinning `wrangler@4.86.0` (matching the Dockerfile), and invoke as `npx --no-install wrangler ...` so an unexpected install fails loudly
+    2. Alternatively, remove `npx` and call the wrangler binary directly from a known path
+    3. Container path is already pinned via `npm install -g wrangler@4.86.0` in the Dockerfile; verify this stays in lockstep with bare-metal
+    4. Optionally pin a wrangler binary checksum in CI
+- Reproduction:
+    1. On a fresh bare-metal host: clear local `node_modules`, then run `python publish_temperature.py`
+    2. `npx wrangler` resolves the latest `wrangler` from the public npm registry, downloads it, executes it
+    3. A compromised version of `wrangler` (or any of its transitive deps) gains code execution with the operator's `CLOUDFLARE_API_TOKEN` and `INFLUXDB_TOKEN` in its environment
 
----
+[REMEDIATION TASK: SEC-010]
+- Status: TODO
+- Location: `/workspace/publish_temperature.py` lines 375-384 (subprocess inherits full env)
+- Vulnerability Type: Excess secret exposure to third-party subprocess
+- Risk Level: Medium
+- Required Action:
+    1. Build an explicit `env` dict containing only what wrangler needs (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `PATH`, `HOME`)
+    2. Pass it as `subprocess.run(..., env=clean_env)`
+    3. This denies the wrangler process visibility into `INFLUXDB_TOKEN` and any unrelated env vars (including any that may be added in future)
+    4. Cover with a test that monkeypatches `subprocess.run` and asserts the `env` kwarg is set and excludes `INFLUXDB_TOKEN`
+- Reproduction:
+    1. Run `publish_temperature.py` with both tokens set
+    2. While the wrangler subprocess is running, in another shell as the same UID: `cat /proc/$(pgrep -n wrangler)/environ | tr '\0' '\n' | grep -E 'INFLUXDB_TOKEN|CLOUDFLARE_API_TOKEN'`
+    3. Both tokens are visible. Wrangler only legitimately needs the Cloudflare one; the InfluxDB token is gratuitously exposed
 
-### T-019: Add developer workflow and Docker instructions to README
+[REMEDIATION TASK: SEC-011]
+- Status: TODO
+- Location: `/workspace/site/_headers` line 6 (CSP), `/workspace/site/index.html` lines 90-145 (inline `<script>`)
+- Vulnerability Type: CSP weakened by `'unsafe-inline'` in `script-src`; missing `base-uri`/`object-src`/`form-action`
+- Risk Level: Medium
+- Required Action:
+    1. Move the inline `<script>` block in `site/index.html` to a separate `site/app.js` file
+    2. Replace `'unsafe-inline'` in CSP `script-src` with `'self'` (drop `'unsafe-inline'` entirely; the inline `<style>` keeps its `'unsafe-inline'` in `style-src` until that is also externalised)
+    3. Add `base-uri 'none'`, `object-src 'none'`, `form-action 'none'` to the CSP
+    4. Confirm via `curl -I https://temperature.pages.dev/` after deploy
+- Reproduction:
+    1. Suppose any of SEC-004 / SEC-005 / T-024 lands an attacker-controlled string into `index.html`. Today the CSP `script-src 'self' 'unsafe-inline'` does not block an injected inline script; the only thing keeping the page safe from XSS-via-meta is the existing T-024 escape work
+    2. Concretely: `curl -I https://temperature.pages.dev/ | grep -i content-security-policy` shows `script-src 'self' 'unsafe-inline'`. With `'unsafe-inline'` present, any injected `<script>...</script>` executes
 
-**Context:** The README currently covers quick start and cron setup for operators, but has no guidance for developers contributing to the project. It also lacks Docker instructions even though T-016 plans Docker packaging. Developers need to know how to set up a dev environment, run tests, modify the HTML page, rebuild the Docker image, and deploy changes.
+[REMEDIATION TASK: SEC-012]
+- Status: TODO
+- Location: `/workspace/site/_headers` line 14 (`Access-Control-Allow-Origin: *` on `/temperature.json`)
+- Vulnerability Type: Wide-open CORS on the data endpoint
+- Risk Level: Low (sensitivity of the temperature reading is low today, but the reading is a side-channel for occupancy/heating patterns)
+- Required Action:
+    1. If no third-party site needs to fetch `/temperature.json`, remove the `Access-Control-Allow-Origin` line entirely (the page itself is same-origin and does not need CORS)
+    2. If a specific consumer is expected, set the header to that explicit origin instead of `*`
+    3. Document the decision in `_headers` as an inline comment
+- Reproduction:
+    1. From any browser, on any third-party origin, run: `fetch('https://temperature.pages.dev/temperature.json').then(r => r.json()).then(console.log)`
+    2. The full payload is returned, including timestamps. A malicious page can build a long-running occupancy graph for the sensor location with no consent
 
-**Requirements:**
-- [ ] Add a "Development" section to `README.md` after "Running Tests" with:
-  - How to set up a local dev environment (clone, venv, install deps, copy .env)
-  - How to preview the page locally: `cd site && python3 -m http.server 8000` with a sample `temperature.json`
-  - How to run the test suite and what to expect (number of tests, what they cover)
-  - How to add a new test: which file, naming conventions, the `_import_fresh()` pattern explained
-  - How to modify `site/index.html` and verify changes locally before deploying
-- [ ] Add a "Docker" section to `README.md` after "Cron Setup" with:
-  - How to build: `docker compose build`
-  - How to run once: `docker compose run --rm publisher`
-  - How to run via cron: `*/5 * * * * cd /path/to/project && docker compose run --rm publisher >> /var/log/temperature.log 2>&1`
-  - How to rebuild after code changes: `docker compose build --no-cache`
-  - Note that `.env` is read via `env_file` in `docker-compose.yml`, not baked into the image
-  - Note that `site/` is volume-mounted so `temperature.json` and `og-image.png` are visible on the host for debugging
-- [ ] Update the "Project Structure" tree to include new files: `site/_headers`, `Dockerfile`, `docker-compose.yml`, `.dockerignore`
-- [ ] Update the "Dependencies" section to mention Pillow and Docker as optional
-- [ ] Update the test count from 35 to the current number (39)
+[REMEDIATION TASK: SEC-013]
+- Status: TODO
+- Location: `/workspace/Dockerfile` line 1 (`FROM python:3.11-slim`)
+- Vulnerability Type: Floating base-image tag (supply-chain reproducibility)
+- Risk Level: Low
+- Required Action:
+    1. Pin to a digest: `FROM python:3.11-slim@sha256:<digest>`
+    2. Look up the current digest via `docker pull python:3.11-slim && docker inspect --format='{{index .RepoDigests 0}}' python:3.11-slim`
+    3. Add a renovate / dependabot rule (or a quarterly manual bump) to refresh the digest
+    4. Apply the same pattern to any future base image
+- Reproduction:
+    1. Today: `docker compose build` pulls `python:3.11-slim` (whatever Docker Hub currently serves)
+    2. Tomorrow Docker Hub re-tags `python:3.11-slim` to a freshly built (potentially compromised, potentially just behaviour-changed) image with different sha256
+    3. The next CI run silently picks up the new image, no diff in source control reflects the change
 
-**Estimated Effort:** 1h
+[REMEDIATION TASK: SEC-014]
+- Status: TODO
+- Location: `/workspace/docker-compose.yml` (no hardening directives)
+- Vulnerability Type: Missing container hardening (capabilities, read-only FS, no-new-privileges, resource limits)
+- Risk Level: Low
+- Required Action:
+    1. Add to the `publisher` service: `read_only: true`, `tmpfs: ["/tmp", "/app/site"]` (the publisher writes to `site/`, which needs to remain writable; consider a named volume for `site/` if persistence matters)
+    2. Add `cap_drop: [ALL]`, `security_opt: ["no-new-privileges:true"]`
+    3. Add `mem_limit: 256m`, `pids_limit: 100` as a starting point, tune from observed usage
+    4. Confirm the publisher still completes a full run after each change
+- Reproduction:
+    1. `docker compose run --rm publisher bash -c 'cat /proc/self/status | grep CapEff'`
+    2. CapEff shows non-zero capabilities; the container has more privileges than the workload requires
+    3. `docker compose run --rm publisher bash -c 'echo malicious > /etc/cron.d/evil && ls -la /etc/cron.d/evil'`
+    4. Inside the container, `appuser` cannot write to `/etc/cron.d` (good, root-owned), but a future privilege-escalation bug in any dependency would not be blocked by `no-new-privileges` because the option is not set
 
----
+[REMEDIATION TASK: SEC-015]
+- Status: TODO
+- Location: `/workspace/publish_temperature.py` lines 401-403 (`logging.error(f"Failed: {e}", exc_info=True)`)
+- Vulnerability Type: Potential secret leakage via exception logging
+- Risk Level: Medium
+- Required Action:
+    1. Wrap the catch-all in a sanitiser that strips `Authorization:` headers and bearer-token-shaped substrings from the rendered exception/traceback before logging
+    2. Or: catch known InfluxDB and `requests` exceptions explicitly, log only the type and a short summary, and reserve `exc_info=True` for unexpected types under a debug-only flag
+    3. Confirm by simulating an Influx 401: temporarily point `INFLUXDB_URL` at a host that returns 401 with the request echoed, run, and inspect the log
+    4. Cover with a test that raises a synthetic exception whose `__str__` contains `Bearer FAKE_TOKEN` and asserts the rendered log does not contain `FAKE_TOKEN`
+- Reproduction:
+    1. Configure `INFLUXDB_URL=http://127.0.0.1:9999` (no listener) and a valid-looking `INFLUXDB_TOKEN`
+    2. Run `python publish_temperature.py`
+    3. The connection error traceback can include the request URL and, depending on `urllib3` / `influxdb-client` version, the full `Authorization: Token <value>` header in the exception chain
+    4. The traceback is written via `logging.error(..., exc_info=True)` to stdout/stderr, which cron forwards via mail and Docker captures into `docker logs` / journald
 
-### T-020: Add configurable query range to prevent full-bucket scans
-
-**Context:** Found during code review (see `__doc/code_reviews/20260503-1000_implementation_batch_review.md`). The Flux query uses `range(start: 0)` which scans from epoch. For a bucket accumulating years of data across many devices, this forces InfluxDB to process the entire series before `last()` can aggregate. This may cause slow queries or timeouts as the bucket grows.
-
-**Requirements:**
-- [ ] Add a `QUERY_RANGE` env var (default: `-30d`) to `.env.example` and the `_parse_int_env` section
-- [ ] Use it in the Flux query: `range(start: {QUERY_RANGE})`
-- [ ] Validate the format (must start with `-` and end with `s`, `m`, `h`, `d`, or `w`)
-- [ ] Document in `SETUP.md` that this controls how far back the query looks, and that `-30d` is generous for a sensor that reports every few minutes
-
-**Estimated Effort:** 30min
+[REMEDIATION TASK: SEC-016]
+- Status: TODO
+- Location: `/workspace/.env` lines 3 and 14 (re-verification of SEC-001 and SEC-002 rotation)
+- Vulnerability Type: Critical-secret rotation overdue
+- Risk Level: Critical (inherits from SEC-001/SEC-002)
+- Required Action:
+    1. Confirm SEC-001 (InfluxDB token, prefix `Jv6KW9wB...`, suffix `...Fd-g==`) has been revoked at the InfluxDB UI; current `/workspace/.env` line 3 still matches the prefix/suffix documented in SEC-001, so revocation has not happened yet
+    2. Confirm SEC-002 (Cloudflare token, prefix `cfut_mqE0...`, suffix `...3dba`) has been rolled at the Cloudflare dashboard; current `/workspace/.env` line 14 still matches the prefix/suffix documented in SEC-002, so revocation has not happened yet
+    3. After both providers confirm revocation and replacement tokens are deployed, flip SEC-001 and SEC-002 status to Done and remove this entry
+    4. Add a calendar reminder to revisit in 90 days regardless
+- Reproduction:
+    1. Compare `head -c 12 < <(grep ^INFLUXDB_TOKEN= /workspace/.env | cut -d= -f2)` against the prefix in SEC-001 (`Jv6KW9wB`); they match today, proving the original leaked token is still live in the file (and presumably still accepted by InfluxDB)
+    2. Compare `head -c 12 < <(grep ^CLOUDFLARE_API_TOKEN= /workspace/.env | cut -d= -f2)` against the prefix in SEC-002 (`cfut_mqE0`); they match today, same conclusion for Cloudflare
+    3. (Do NOT echo the full token values when running these checks; the prefix is sufficient to confirm non-rotation)
 
 ---
 
 ## Completed (archived)
 
-All original tickets T-001 through T-008 have been implemented, tested, and committed. The following is a summary for reference:
+All tickets T-001 through T-023 are implemented, tested, and committed. Summary table preserved for reference and to support cross-references from open tickets:
 
 | ID | Title | Status |
 |----|-------|--------|
 | T-001 | Secure subprocess calls (shlex) | Done, then superseded by Cloudflare migration |
-| T-002 | Parameterize Flux query | Done, 5 tests |
+| T-002 | Parameterize Flux query | Done, replaced by allowlist-validated f-string interpolation, 5 tests |
 | T-003 | Add timeouts to blocking calls | Done, 4 tests |
 | T-004 | Pin deps and env validation | Done, 4 tests |
-| T-005a | Temperature value validation | Done, 6 tests |
-| T-005b | Structured logging | Done, 2 tests (exception logging gap found, see T-009) |
+| T-005a | Temperature value validation | Done, 6 tests, extracted to `_validate_last_value` helper in T-022a |
+| T-005b | Structured logging | Done, 2 tests |
 | T-006 | Remote .tmp cleanup | Done, then superseded by Cloudflare migration |
-| T-007a | Static index.html | Done, manual QA pending (see T-011) |
-| T-007b | Inline JS for data fetch | Done, manual QA pending (see T-011) |
+| T-007a/b | Static index.html + JS data fetch | Done, manual QA still tracked under T-011 |
 | T-007c | Cloudflare Pages publish | Done, 5 tests |
 | T-007d | Update env vars for Cloudflare | Done, 6 tests |
-| T-008 | Setup documentation | Done, walkthrough pending (see T-012) |
+| T-008 | Setup documentation | Done, walkthrough still tracked under T-012 |
+| T-009 | Exception handling in `main()` | Done, `try/except` for `CalledProcessError` and generic `Exception`, both `sys.exit(1)`, 2 tests |
+| T-010 | Separate `DEPLOY_TIMEOUT_SECONDS` | Done, defaults to 120s, separate from `TIMEOUT_SECONDS`, 2 tests |
+| T-013 | Module-level int parsing with clear errors | Done, `_parse_int_env` helper handles `TIMEOUT_SECONDS`, `DEPLOY_TIMEOUT_SECONDS`, `TEMP_MIN`, `TEMP_MAX`, 3 tests |
+| T-014 | Validate `SITE_DIR` exists at startup | Done, exits with the resolved path on missing directory, 1 test |
+| T-015 | Cache-bust `temperature.json` | Done, both `?t=Date.now()` query string and `Cache-Control: no-cache, no-store, must-revalidate` rule in `site/_headers` |
+| T-016 | Docker packaging | Done, `Dockerfile` (python:3.11-slim, Node.js, wrangler@4.86.0, DejaVu fonts, non-root `appuser`), `docker-compose.yml` (`env_file: .env`), `.dockerignore` |
+| T-017 | OpenGraph meta + dynamic OG image | Done, Pillow pinned to 9.4.0, `generate_og_image()` writes `og-<uuid>.png` per run with cache-busting filename, `_update_og_meta()` rewrites the OG/Twitter meta block in place |
+| T-018 | Security headers via `_headers` | Done, full CSP, HSTS with preload, X-Frame-Options DENY, COOP/CORP, plus per-path no-cache for `/temperature.json` |
+| T-019 | README dev workflow + Docker section | Done, README has Development, Docker, updated Project Structure, Pillow + Docker in Dependencies |
+| T-020 | Configurable QUERY_RANGE | Done, `_parse_duration_env` helper with regex `^-\d+[smhdw]$`, `QUERY_RANGE` defaults to `-30d`, 5 tests, documented in `.env.example`, `SETUP.md`, README |
+| T-021a | Remove HOST_FILTER from code | Done, churning Docker container ID was breaking queries on every container restart, 2 regression tests |
+| T-021b | Remove HOST_FILTER from docs | Done, scrubbed from `.env.example`, README, SETUP.md, CLAUDE.md |
+| T-022a | Compute 36h min/max in fetch | Done, multi-yield Flux query, `_table_yield_name` dispatcher, `min_36h`/`max_36h` fields in JSON payload, 5 tests |
+| T-022b | Display 36h min/max on page | Done, new `#min-max` div with CSS sized between temperature and timestamp, JS reads new fields with `--` fallback |
+| T-023 | Pretty-print sensor name | Done, `_pretty_device_name` helper (e.g. `gisebo-01` to `Gisebo 01`), `device_name` field in JSON, wired into OG image label, OG meta rewriter, page JS, 9 tests |
 
 ## Stats
 
-- **Open tickets:** 9 (2 manual QA, 4 hardening/security, 1 packaging, 1 feature, 1 documentation)
-- **Completed tickets:** 13 (T-001 through T-010)
-- **Estimated remaining effort:** 11h
+- **Open tickets:** 2 (T-011 and T-012, both manual QA, deferred to operator)
+- **Security remediation pending:** 16 (SEC-001 and SEC-002 from the original .env scan, SEC-003 through SEC-016 from the T-026 audit; SEC-001/SEC-002/SEC-016 require operator action at provider consoles, the rest require code changes)
+- **Completed tickets:** 28 (T-001 through T-025, plus T-026 audit deliverables)
+- **Test suite:** 62 passing
+- **Estimated remaining effort:** manual QA (T-011, T-012) is operator-blocked; the SEC-003 through SEC-015 remediation backlog is the next major work surface and should be prioritised by Risk Level (High first, then Medium, then Low)
