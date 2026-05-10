@@ -2,6 +2,7 @@
 """Fetch latest temperature from InfluxDB and publish to Cloudflare Pages."""
 
 import glob
+import html
 import json
 import logging
 import math
@@ -326,7 +327,11 @@ def generate_og_image(data):
 def _update_og_meta(data, og_filename):
     """Rewrite the OG meta tags in index.html with absolute URLs and current data."""
     index_path = SITE_DIR / "index.html"
-    html = index_path.read_text()
+    # Local variable name avoids shadowing the imported `html` module
+    # used below for html.escape(). Naming it source_html instead of
+    # html keeps the escape calls below resolving to the stdlib module
+    # without renaming every usage at the call site of escape().
+    source_html = index_path.read_text()
 
     temp = data["temperature"]
     # T-023: prefer the pretty-printed display form for human-facing
@@ -334,15 +339,29 @@ def _update_og_meta(data, og_filename):
     # device_id stays in the JSON so machine consumers (dashboards,
     # external integrations) keep a stable identifier.
     device = data.get("device_name") or data["device_id"]
-    og_title = f"{temp}°C — {device} Temperature"
-    og_desc = f"Current reading: {temp}°C from sensor {device}. Live temperature display updated automatically."
-    og_image = f"{SITE_URL}/{og_filename}"
+    # T-024: html.escape with quote=True replaces &, <, >, ", and ' with
+    # their entity equivalents so a hostile device name cannot break
+    # out of the content="..." attribute and inject sibling tags. The
+    # CSP at site/_headers blocks inline script execution, so the
+    # remaining risk is structural breakage of the meta block (which
+    # would break OG previews on social-media crawlers), not script
+    # execution. We escape both the textual fields and the image URL,
+    # since SITE_URL flows from operator-controlled .env and the
+    # filename embeds a UUID we generate ourselves but that still
+    # passes through string interpolation.
+    og_title = html.escape(f"{temp}°C — {device} Temperature", quote=True)
+    og_desc = html.escape(
+        f"Current reading: {temp}°C from sensor {device}. Live temperature display updated automatically.",
+        quote=True,
+    )
+    og_image = html.escape(f"{SITE_URL}/{og_filename}", quote=True)
+    og_url = html.escape(f"{SITE_URL}/", quote=True)
 
     og_block = f"""    <!-- OG_META_START -->
     <meta property="og:title" content="{og_title}">
     <meta property="og:description" content="{og_desc}">
     <meta property="og:type" content="website">
-    <meta property="og:url" content="{SITE_URL}/">
+    <meta property="og:url" content="{og_url}">
     <meta property="og:image" content="{og_image}">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
@@ -353,13 +372,13 @@ def _update_og_meta(data, og_filename):
     <!-- OG_META_END -->"""
 
     import re as _re
-    html = _re.sub(
+    rewritten = _re.sub(
         r"    <!-- OG_META_START -->.*?<!-- OG_META_END -->",
         og_block,
-        html,
+        source_html,
         flags=_re.DOTALL,
     )
-    index_path.write_text(html)
+    index_path.write_text(rewritten)
 
 
 def publish(data):

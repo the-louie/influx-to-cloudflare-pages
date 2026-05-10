@@ -873,3 +873,143 @@ class TestSiteDirValidation:
         assert exc_info.value.code == 1
         captured = capsys.readouterr()
         assert "site" in captured.err.lower()
+
+
+# ---------------------------------------------------------------------------
+# T-024: HTML escaping in _update_og_meta
+# ---------------------------------------------------------------------------
+
+class TestOgMetaEscaping:
+    """T-024: Verify that hostile device names cannot break the OG meta block.
+
+    The OG/Twitter meta block is rewritten in place by _update_og_meta with
+    values that originate in InfluxDB (device_id) or operator-controlled
+    .env (SITE_URL). The CSP at site/_headers blocks runtime script
+    execution, so the practical risk is structural breakage of the meta
+    tags, which would silently break OG previews on social-media crawlers.
+    These tests pin the escaping behaviour so a future refactor cannot
+    quietly drop html.escape() and reintroduce the malformed-tag class.
+    """
+
+    # The regex inside _update_og_meta requires 4 leading spaces before
+    # the OG_META_START marker (matching the indentation in the real
+    # site/index.html). The shared _MINIMAL_INDEX_HTML fixture is
+    # unindented to keep other tests compact, so this class uses its
+    # own indented fixture so the rewrite actually fires.
+    _INDENTED_INDEX_HTML = (
+        "<html><head>\n"
+        "    <!-- OG_META_START -->\n"
+        '    <meta property="og:image" content="og-placeholder.png">\n'
+        "    <!-- OG_META_END -->\n"
+        "</head><body></body></html>"
+    )
+
+    def _make_indented_site(self, tmp_path):
+        site_dir = tmp_path / "site"
+        site_dir.mkdir()
+        (site_dir / "index.html").write_text(self._INDENTED_INDEX_HTML)
+        return site_dir
+
+    def _payload(self, device_name):
+        # Minimal payload shape required by _update_og_meta. The function
+        # only reads temperature, device_name (preferred), and device_id
+        # (fallback), so we keep the rest absent to make the test focus
+        # crisp.
+        return {
+            "temperature": 22.5,
+            "device_id": "gisebo-01",
+            "device_name": device_name,
+        }
+
+    def test_hostile_device_name_is_escaped(self, monkeypatch, tmp_path):
+        # The crafted device name embeds a closing quote, a closing tag,
+        # and a script open tag. Without escaping, the rewritten meta
+        # block would contain the literal '<script' inside a content
+        # attribute and an unbalanced '>' that breaks tag boundaries.
+        # With html.escape(quote=True), all three dangerous characters
+        # ('"', '<', '>') become their entity equivalents and the meta
+        # block stays well-formed.
+        mod = _import_fresh()
+        site_dir = self._make_indented_site(tmp_path)
+        monkeypatch.setattr(mod, "SITE_DIR", site_dir)
+
+        hostile = 'Foo"><script>alert(1)</script>'
+        mod._update_og_meta(self._payload(hostile), "og-test.png")
+        rewritten = (site_dir / "index.html").read_text()
+
+        # 1. The rewritten HTML must not contain the literal '<script'
+        # substring inside any content attribute. We slice the OG block
+        # out of the document and search inside it. A naive substring
+        # search across the whole document would also pass because the
+        # minimal index has no other <script>, but scoping to the OG
+        # block makes the intent explicit and survives test fixtures
+        # that grow a real <script> tag elsewhere in index.html.
+        og_start = rewritten.index("<!-- OG_META_START -->")
+        og_end = rewritten.index("<!-- OG_META_END -->")
+        og_block = rewritten[og_start:og_end]
+        assert "<script" not in og_block, (
+            "Unescaped script tag leaked into the OG meta block. "
+            "Check html.escape() usage in _update_og_meta()."
+        )
+
+        # 2. The dangerous characters must appear escaped at least once
+        # (proving escape ran), not just be absent (which could mean
+        # someone stripped them). We expect each of the three entities
+        # to appear in the og:title or og:description fields.
+        assert "&quot;" in og_block
+        assert "&gt;" in og_block
+        assert "&lt;" in og_block
+
+        # 3. Every <meta> tag in the OG block must be well-formed: each
+        # opening '<meta' is balanced by exactly one '>'. We count the
+        # markers as a cheap structural well-formedness check, since a
+        # full HTML parser is overkill for a regression guard.
+        meta_open_count = og_block.count("<meta")
+        meta_close_count = og_block.count(">")
+        # Each <meta ...> closes with exactly one '>'. If the hostile
+        # input had broken out of an attribute, we would see an extra
+        # '>' from the injected payload pushing the count above the
+        # number of <meta tags. The minimal block contains 11 meta
+        # tags after rewriting, plus one '>' from the OG_META_START
+        # comment that opens this slice, for 12 total. This pins the
+        # exact shape so any future malformed output trips the test.
+        assert meta_close_count == meta_open_count + 1, (
+            f"OG block has {meta_open_count} <meta tags but {meta_close_count} '>' "
+            f"characters. Mismatch indicates a malformed tag from unescaped input."
+        )
+
+    def test_ascii_device_name_unchanged_happy_path(self, monkeypatch, tmp_path):
+        # Regression guard: a benign ASCII device name should produce a
+        # readable OG block with no entity-escaped artefacts in the
+        # human-visible fields. html.escape() on plain ASCII is a
+        # no-op, so the rendered title and description should match
+        # exactly what they looked like before T-024 added escaping.
+        mod = _import_fresh()
+        site_dir = self._make_indented_site(tmp_path)
+        monkeypatch.setattr(mod, "SITE_DIR", site_dir)
+
+        mod._update_og_meta(self._payload("Gisebo 01"), "og-abcd1234.png")
+        rewritten = (site_dir / "index.html").read_text()
+
+        # The pretty device name flows verbatim into og:title and
+        # og:description and twitter:title. We assert the human-readable
+        # phrasing so a future refactor of the title format trips the
+        # test and forces a deliberate decision.
+        assert 'content="22.5°C — Gisebo 01 Temperature"' in rewritten
+        assert "Current reading: 22.5°C from sensor Gisebo 01" in rewritten
+
+        # And the OG image filename should land in the og:image and
+        # twitter:image content attributes unmodified, since plain
+        # filenames have no characters that html.escape() touches.
+        assert 'og-abcd1234.png"' in rewritten
+        # Negative assertion: there should be NO entity references in
+        # the happy-path block. If escape ever starts mangling benign
+        # input (e.g. by escaping a literal & to &amp; in a URL that
+        # genuinely needed an &), this catches the regression.
+        og_start = rewritten.index("<!-- OG_META_START -->")
+        og_end = rewritten.index("<!-- OG_META_END -->")
+        og_block = rewritten[og_start:og_end]
+        assert "&quot;" not in og_block
+        assert "&gt;" not in og_block
+        assert "&lt;" not in og_block
+        assert "&amp;" not in og_block
