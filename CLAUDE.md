@@ -5,10 +5,13 @@ Fetch a temperature data point from InfluxDB (backing a Grafana dashboard) and p
 
 ## Architecture
 - **Source:** InfluxDB 2.x with validated f-string Flux queries (allowlist-based input validation, see `_validate_flux_value` and `_parse_duration_env` in `publish_temperature.py`), bucket `home_assistant`
+- **Template:** `templates/index.html` is the hand-edited source. The publish pipeline renders it into `site/index.html` with the current OG meta block on every run, so the committed template never carries rotating UUIDs.
 - **Transport:** Wrangler CLI deploys the `site/` directory to Cloudflare Pages
-- **Destination:** Static site on Cloudflare Pages containing `index.html` (temperature display) and `temperature.json` (data)
+- **Destination:** Static site on Cloudflare Pages containing the rendered `index.html` (temperature display) and `temperature.json` (data)
 - **Frontend:** Single-page `index.html` with inline CSS/JS, displays temperature in large centered text, auto-refreshes every 60 seconds
 - **Automation:** Cron job runs the fetch-and-publish script periodically
+
+`site/` is treated as pure build output. Only `site/_headers` is committed; `site/index.html`, `site/temperature.json`, and `site/og-*.png` are all gitignored and regenerated on every publish run.
 
 ## Key Data Point
 - Measurement: `http_listener_v2`
