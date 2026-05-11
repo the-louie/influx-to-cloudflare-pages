@@ -6,15 +6,16 @@ Fetches the latest temperature reading from an InfluxDB instance and publishes i
 
 ```
 InfluxDB  --->  publish_temperature.py  --->  Cloudflare Pages
-(Flux query)       (fetch + validate)         (site/index.html + temperature.json)
+(Flux query)       (fetch + validate)         (rendered site/ directory)
 ```
 
 1. The Python script queries InfluxDB for the most recent temperature value
 2. It validates the reading (rejects null, non-numeric, NaN, and infinite values)
-3. It generates `site/og-image.png` for social media link previews
-4. It writes the data to `site/temperature.json`
-5. It deploys the `site/` directory to Cloudflare Pages using the Wrangler CLI
-6. The static `index.html` page fetches `temperature.json` and displays the value
+3. It generates `site/og-<uuid>.png` for social media link previews
+4. It renders `templates/index.html` into `site/index.html` with the current OG meta tags
+5. It writes the data to `site/temperature.json`
+6. It deploys the `site/` directory to Cloudflare Pages using the Wrangler CLI
+7. The rendered `index.html` page fetches `temperature.json` and displays the value
 
 The script is designed to run as a cron job. All output uses structured logging for compatibility with log collectors.
 
@@ -135,9 +136,13 @@ Secrets are never baked into the image. They are read from `.env` at runtime via
 ```
 .
 ├── publish_temperature.py       # Main script: fetch, validate, deploy
+├── templates/
+│   └── index.html               # Hand-edited page template (source of truth)
 ├── site/
-│   ├── index.html               # Static temperature display page
-│   └── _headers                 # Cloudflare Pages security headers
+│   ├── _headers                 # Cloudflare Pages security headers (committed)
+│   ├── index.html               # Rendered from template (gitignored, regenerated each run)
+│   ├── og-<uuid>.png            # Generated OG preview image (gitignored)
+│   └── temperature.json         # Generated payload (gitignored)
 ├── test_publish_temperature.py  # Test suite (60 tests)
 ├── requirements.txt             # Pinned Python dependencies
 ├── Dockerfile                   # Container image definition
@@ -148,6 +153,8 @@ Secrets are never baked into the image. They are read from `.env` at runtime via
 ├── CLAUDE.md                    # Project conventions
 └── TODO.md                      # Task tracking
 ```
+
+`site/` is the directory Wrangler uploads to Cloudflare Pages. Apart from `_headers`, its contents are build output: the publish pipeline regenerates them on every run, so they are listed in `.gitignore` to keep the source tree clean.
 
 ## Data Format
 
@@ -176,18 +183,19 @@ The test suite has 60 tests covering InfluxDB query validation, timeout propagat
 
 ### Local page preview
 
-You can preview the HTML page without deploying. Create a sample data file and serve it locally:
+You can preview the HTML page without deploying. Copy the template into the deploy directory, drop in a sample data file, and serve `site/` locally:
 
 ```bash
+cp templates/index.html site/index.html
 echo '{"device_id":"gisebo-01","temperature":22.5,"time":"2026-05-02T12:00:00+00:00","updated_at":"2026-05-02T12:00:01+00:00"}' > site/temperature.json
 cd site && python3 -m http.server 8000
 ```
 
-Open `http://localhost:8000` to see the page. Edit `site/index.html` and refresh.
+Open `http://localhost:8000` to see the page. Edit `templates/index.html` and re-copy to refresh.
 
 ### Making code changes
 
-1. Edit `publish_temperature.py` or `site/index.html`
+1. Edit `publish_temperature.py` or `templates/index.html`
 2. Run the test suite: `python -m pytest test_publish_temperature.py -v`
 3. Test locally: `python publish_temperature.py` (needs a valid `.env`)
 4. If using Docker, rebuild: `docker compose build`
