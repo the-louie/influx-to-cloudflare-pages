@@ -244,26 +244,58 @@ data
 
         last_value = None
         last_time = None
+        last_seen_any = False  # True if at least one "last" record arrived, even if all were invalid
         min_36h = None
         max_36h = None
 
         for table in tables:
             yield_name = _table_yield_name(table)
+            # Unnamed yields are treated as the "last" yield. Multi-yield
+            # queries always name their outputs, but older single-yield
+            # shapes (or test fixtures) may omit the name entirely.
+            effective_yield = yield_name or "last"
             for record in table.records:
                 value = record.get_value()
-                if yield_name == "last" or (yield_name == "" and last_value is None):
+                if effective_yield == "last":
+                    last_seen_any = True
                     validated = _validate_last_value(value)
                     if validated is None:
-                        return None
-                    last_value = validated
-                    last_time = record.get_time()
-                elif yield_name == "min_36h":
+                        # Skip this invalid record but keep scanning. With
+                        # |> group() in the Flux query we expect exactly
+                        # one "last" record, so this branch should not
+                        # trigger in practice. The defensive continue
+                        # exists so a single bad row in a future
+                        # multi-row shape does not abort the whole
+                        # publish if a good row also exists.
+                        continue
+                    record_time = record.get_time()
+                    # Across multiple "last" records, keep the one with the
+                    # newest timestamp. Defense in depth: the |> group()
+                    # in the Flux pipeline should make this loop see only
+                    # one record, but if grouping is ever accidentally
+                    # dropped or a new tag dimension silently splits the
+                    # series, the time-wise newest still wins (rather
+                    # than whichever table the client iterated last,
+                    # which is non-deterministic).
+                    if last_time is None or record_time > last_time:
+                        last_value = validated
+                        last_time = record_time
+                elif effective_yield == "min_36h":
                     if isinstance(value, (int, float)) and math.isfinite(value):
-                        min_36h = value
-                elif yield_name == "max_36h":
+                        # Fold across all valid records. With group() we
+                        # expect one record, but fold-min is the right
+                        # semantic for any future shape.
+                        min_36h = value if min_36h is None else min(min_36h, value)
+                elif effective_yield == "max_36h":
                     if isinstance(value, (int, float)) and math.isfinite(value):
-                        max_36h = value
+                        max_36h = value if max_36h is None else max(max_36h, value)
 
+        # No "last" record at all: nothing to publish.
+        if not last_seen_any:
+            return None
+        # "last" rows arrived but every one failed validation (NaN, inf,
+        # None, non-numeric). Preserve the pre-existing abort behavior
+        # so corrupt data is not silently published.
         if last_value is None or last_time is None:
             return None
 
