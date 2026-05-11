@@ -20,7 +20,7 @@ Fetch a temperature data point from InfluxDB (backing a Grafana dashboard) and p
 - Query fetches the last (most recent) value
 
 ## Flux Query
-The snippet below is illustrative pseudocode showing the query shape, not the literal source. The real query lives in `fetch_temperature()` in `publish_temperature.py` and uses validated f-string interpolation plus a multi-yield form that also computes 36h min/max in the same round trip. `|> group()` is load-bearing: without it, `last()`/`min()`/`max()` operate per-series (one table per unique tag combination, e.g. per `host`) and return ambiguous "latest" rows that the Python loop cannot principally rank.
+The snippet below is illustrative pseudocode showing the query shape, not the literal source. The real query lives in `fetch_temperature()` in `publish_temperature.py` and uses validated f-string interpolation plus a multi-yield form that also computes 36h min/max in the same round trip. `|> group()` is load-bearing: without it, `last()`/`min()`/`max()` operate per-series (one table per unique tag combination, e.g. per `host`) and return ambiguous "latest" rows that the Python loop cannot principally rank. `|> sort(columns: ["_time"])` after `group()` is equally load-bearing: Flux `last()` returns the last row in the table's iteration order, not the row with max `_time`, and `group()` does not preserve global time order across merged series.
 ```flux
 from(bucket: "home_assistant")
   |> range(start: -30d)
@@ -28,6 +28,7 @@ from(bucket: "home_assistant")
   |> filter(fn: (r) => r["_field"] == params.field)
   |> filter(fn: (r) => r["device_id"] == params.device_id)
   |> group()
+  |> sort(columns: ["_time"])
   |> last()
 ```
 
