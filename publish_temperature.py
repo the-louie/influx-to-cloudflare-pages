@@ -123,9 +123,27 @@ TEMP_MAX = _parse_int_env("TEMP_MAX", "80")
 # may need to widen this to -90d or more.
 QUERY_RANGE = _parse_duration_env("QUERY_RANGE", "-30d")
 
+# site/ is the deploy directory Wrangler uploads to Cloudflare Pages.
+# It is treated as pure build output: index.html, temperature.json, and
+# og-*.png are all (re)generated on every publish run. The static
+# _headers file is the one committed exception, since it is not
+# templated and never changes per run.
 SITE_DIR = Path(__file__).parent / "site"
 if not SITE_DIR.is_dir():
     print(f"Site directory not found: {SITE_DIR.resolve()}", file=sys.stderr)
+    sys.exit(1)
+
+# templates/ holds the hand-edited source of index.html. The publish
+# pipeline renders it (currently just by rewriting the OG meta block)
+# into SITE_DIR/index.html on every run. Keeping the template out of
+# the deploy directory prevents every publish run from dirtying a
+# committed file with a rotating OG image filename.
+TEMPLATE_DIR = Path(__file__).parent / "templates"
+if not (TEMPLATE_DIR / "index.html").is_file():
+    print(
+        f"Index template not found: {(TEMPLATE_DIR / 'index.html').resolve()}",
+        file=sys.stderr,
+    )
     sys.exit(1)
 
 
@@ -368,13 +386,20 @@ def generate_og_image(data):
 
 
 def _update_og_meta(data, og_filename):
-    """Rewrite the OG meta tags in index.html with absolute URLs and current data."""
-    index_path = SITE_DIR / "index.html"
+    """Render templates/index.html into site/index.html with OG meta filled in.
+
+    The template is the hand-edited source. The site copy is the
+    deployable artifact Wrangler uploads on this run. Reading from one
+    path and writing to another keeps the committed template clean and
+    confines the rotating OG image filename to a gitignored output.
+    """
+    template_path = TEMPLATE_DIR / "index.html"
+    output_path = SITE_DIR / "index.html"
     # Local variable name avoids shadowing the imported `html` module
     # used below for html.escape(). Naming it source_html instead of
     # html keeps the escape calls below resolving to the stdlib module
     # without renaming every usage at the call site of escape().
-    source_html = index_path.read_text()
+    source_html = template_path.read_text()
 
     temp = data["temperature"]
     # T-023: prefer the pretty-printed display form for human-facing
@@ -421,7 +446,7 @@ def _update_og_meta(data, og_filename):
         source_html,
         flags=_re.DOTALL,
     )
-    index_path.write_text(rewritten)
+    output_path.write_text(rewritten)
 
 
 def publish(data):

@@ -52,10 +52,19 @@ _MINIMAL_INDEX_HTML = (
 
 
 def _make_site_dir(tmp_path):
-    """Create a temp site directory with a minimal index.html for publish() tests."""
+    """Create temp site and templates directories for publish() tests.
+
+    Returns the site directory. The index.html template lives in a
+    sibling templates/ dir, matching the layout the publish pipeline
+    expects (TEMPLATE_DIR is separate from SITE_DIR so that rendered
+    output never overwrites the committed source). Callers that need
+    to patch TEMPLATE_DIR can derive it from tmp_path / "templates".
+    """
     site_dir = tmp_path / "site"
     site_dir.mkdir()
-    (site_dir / "index.html").write_text(_MINIMAL_INDEX_HTML)
+    template_dir = tmp_path / "templates"
+    template_dir.mkdir()
+    (template_dir / "index.html").write_text(_MINIMAL_INDEX_HTML)
     return site_dir
 
 
@@ -656,6 +665,7 @@ class TestCloudflarePublish:
         # Point SITE_DIR to a temp directory
         site_dir = _make_site_dir(tmp_path)
         monkeypatch.setattr(mod, "SITE_DIR", site_dir)
+        monkeypatch.setattr(mod, "TEMPLATE_DIR", tmp_path / "templates")
         monkeypatch.setattr(subprocess, "run", lambda *a, **kw: None)
 
         data = {
@@ -679,6 +689,7 @@ class TestCloudflarePublish:
 
         site_dir = _make_site_dir(tmp_path)
         monkeypatch.setattr(mod, "SITE_DIR", site_dir)
+        monkeypatch.setattr(mod, "TEMPLATE_DIR", tmp_path / "templates")
 
         calls = []
 
@@ -706,6 +717,7 @@ class TestCloudflarePublish:
 
         site_dir = _make_site_dir(tmp_path)
         monkeypatch.setattr(mod, "SITE_DIR", site_dir)
+        monkeypatch.setattr(mod, "TEMPLATE_DIR", tmp_path / "templates")
 
         calls = []
         monkeypatch.setattr(subprocess, "run", lambda *a, **kw: calls.append(kw))
@@ -720,6 +732,7 @@ class TestCloudflarePublish:
 
         site_dir = _make_site_dir(tmp_path)
         monkeypatch.setattr(mod, "SITE_DIR", site_dir)
+        monkeypatch.setattr(mod, "TEMPLATE_DIR", tmp_path / "templates")
 
         calls = []
         monkeypatch.setattr(subprocess, "run", lambda *a, **kw: calls.append(kw))
@@ -735,6 +748,7 @@ class TestCloudflarePublish:
 
         site_dir = _make_site_dir(tmp_path)
         monkeypatch.setattr(mod, "SITE_DIR", site_dir)
+        monkeypatch.setattr(mod, "TEMPLATE_DIR", tmp_path / "templates")
 
         calls = []
         monkeypatch.setattr(subprocess, "run", lambda *a, **kw: calls.append(kw))
@@ -749,6 +763,7 @@ class TestCloudflarePublish:
 
         site_dir = _make_site_dir(tmp_path)
         monkeypatch.setattr(mod, "SITE_DIR", site_dir)
+        monkeypatch.setattr(mod, "TEMPLATE_DIR", tmp_path / "templates")
 
         calls = []
 
@@ -826,6 +841,7 @@ class TestExceptionHandling:
 
         site_dir = _make_site_dir(tmp_path)
         monkeypatch.setattr(mod, "SITE_DIR", site_dir)
+        monkeypatch.setattr(mod, "TEMPLATE_DIR", tmp_path / "templates")
 
         mock_record = MagicMock()
         mock_record.get_value.return_value = 22.5
@@ -1021,9 +1037,15 @@ class TestOgMetaEscaping:
     )
 
     def _make_indented_site(self, tmp_path):
+        # The template lives under tmp_path/templates so it matches the
+        # publish_temperature.py layout (TEMPLATE_DIR for source,
+        # SITE_DIR for rendered output). The rewritten index.html is
+        # written into the (initially empty) site directory.
         site_dir = tmp_path / "site"
         site_dir.mkdir()
-        (site_dir / "index.html").write_text(self._INDENTED_INDEX_HTML)
+        template_dir = tmp_path / "templates"
+        template_dir.mkdir()
+        (template_dir / "index.html").write_text(self._INDENTED_INDEX_HTML)
         return site_dir
 
     def _payload(self, device_name):
@@ -1048,6 +1070,7 @@ class TestOgMetaEscaping:
         mod = _import_fresh()
         site_dir = self._make_indented_site(tmp_path)
         monkeypatch.setattr(mod, "SITE_DIR", site_dir)
+        monkeypatch.setattr(mod, "TEMPLATE_DIR", tmp_path / "templates")
 
         hostile = 'Foo"><script>alert(1)</script>'
         mod._update_og_meta(self._payload(hostile), "og-test.png")
@@ -1103,6 +1126,7 @@ class TestOgMetaEscaping:
         mod = _import_fresh()
         site_dir = self._make_indented_site(tmp_path)
         monkeypatch.setattr(mod, "SITE_DIR", site_dir)
+        monkeypatch.setattr(mod, "TEMPLATE_DIR", tmp_path / "templates")
 
         mod._update_og_meta(self._payload("Gisebo 01"), "og-abcd1234.png")
         rewritten = (site_dir / "index.html").read_text()

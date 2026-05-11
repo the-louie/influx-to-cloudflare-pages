@@ -4,5 +4,6 @@ __pycache__/
 *.pyc
 .claude/
 .wrangler/
+site/index.html
 site/temperature.json
 site/og-*.png
