@@ -13,8 +13,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code and static site
+# Copy application code, page template, and static site
 COPY publish_temperature.py .
+COPY templates/ templates/
 COPY site/ site/
 
 RUN useradd -r -u 1000 -m appuser && chown -R appuser:appuser /app
