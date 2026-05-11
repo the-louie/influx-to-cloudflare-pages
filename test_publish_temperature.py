@@ -446,14 +446,16 @@ class TestMinMax36h:
         table.get_group_key.return_value = {"result": yield_name}
         return table
 
-    def test_query_groups_before_yields(self, monkeypatch):
+    def test_query_groups_and_sorts_before_yields(self, monkeypatch):
         # Regression guard for the multi-host bug: if a device reports
         # under several `host` tag values over the QUERY_RANGE window,
         # InfluxDB returns one table per series unless the pipeline
-        # explicitly collapses them. |> group() is what guarantees a
-        # single global last()/min()/max(). Removing it silently
-        # re-introduces the non-deterministic "whichever series the
-        # client iterated last wins" bug.
+        # explicitly collapses them. |> group() guarantees a single
+        # global last()/min()/max(). |> sort(columns: ["_time"]) after
+        # group() guarantees that Flux last() (which returns the last
+        # row in iteration order, not the row with max _time) actually
+        # picks the time-wise newest record. Dropping either operator
+        # silently re-introduces the stale-reading bug.
         mod = _import_fresh()
         api = MagicMock()
         api.query.return_value = [self._make_table(22.5, "last")]
@@ -464,11 +466,14 @@ class TestMinMax36h:
         mod.fetch_temperature()
         query = api.query.call_args[0][0]
         assert "|> group()" in query
-        # And it must precede the yields, otherwise the per-series
-        # grouping is already baked into the selectors above.
+        assert '|> sort(columns: ["_time"])' in query
+        # Order must be: group() -> sort() -> yields. Otherwise the
+        # per-series time ordering inherited from range/filter is
+        # invalidated by group() but never restored before last().
         group_pos = query.index("|> group()")
+        sort_pos = query.index('|> sort(columns: ["_time"])')
         first_yield_pos = query.index('yield(name: "last")')
-        assert group_pos < first_yield_pos
+        assert group_pos < sort_pos < first_yield_pos
 
     def test_multiple_last_tables_picks_newest_by_time(self, monkeypatch):
         # Defense in depth for the multi-host bug. Even if |> group()
