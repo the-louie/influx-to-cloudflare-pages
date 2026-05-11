@@ -206,12 +206,23 @@ def fetch_temperature():
     # QUERY_RANGE only bounds how far back to look for the latest
     # reading and 36h is the user-facing recency window for the
     # min/max display.
+    #
+    # |> group() is load-bearing. Without it, InfluxDB returns one
+    # table per unique tag combination (e.g. one per `host` value),
+    # and last()/min()/max() are computed per-series, not globally.
+    # In practice a single device often reports under several `host`
+    # tags over a 30-day window (each container restart picks a new
+    # short hostname), so last() per-series returns several "latest"
+    # rows and downstream Python is forced to pick one with no
+    # principled basis. group() collapses everything into a single
+    # group so the selectors operate over all points for the device.
     query = f"""
 data = from(bucket: "{INFLUXDB_BUCKET}")
   |> range(start: {QUERY_RANGE})
   |> filter(fn: (r) => r["_measurement"] == "{MEASUREMENT}")
   |> filter(fn: (r) => r["_field"] == "{FIELD}")
   |> filter(fn: (r) => r["device_id"] == "{DEVICE_ID}")
+  |> group()
 
 data
   |> last()
