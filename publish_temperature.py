@@ -234,6 +234,18 @@ def fetch_temperature():
     # rows and downstream Python is forced to pick one with no
     # principled basis. group() collapses everything into a single
     # group so the selectors operate over all points for the device.
+    #
+    # |> sort(columns: ["_time"]) after group() is also load-bearing.
+    # Flux `last()` returns the LAST RECORD in the table's iteration
+    # order; it does NOT scan for the maximum `_time`. Per-series
+    # inputs are time-sorted by upstream operators (range/filter),
+    # but group() merges them without preserving global time order,
+    # so the table after group() can have rows from older series at
+    # the end. Without an explicit sort, last() returns whichever row
+    # group() happened to append last, which is exactly the
+    # non-deterministic stale-reading symptom this whole block exists
+    # to prevent. min()/max() below are value selectors and do not
+    # depend on sort order, so the sort only matters for last().
     query = f"""
 data = from(bucket: "{INFLUXDB_BUCKET}")
   |> range(start: {QUERY_RANGE})
@@ -241,6 +253,7 @@ data = from(bucket: "{INFLUXDB_BUCKET}")
   |> filter(fn: (r) => r["_field"] == "{FIELD}")
   |> filter(fn: (r) => r["device_id"] == "{DEVICE_ID}")
   |> group()
+  |> sort(columns: ["_time"])
 
 data
   |> last()
