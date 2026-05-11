@@ -425,6 +425,122 @@ class TestMinMax36h:
         assert result["min_36h"] is None
         assert result["max_36h"] is None
 
+    def _make_table_at(self, value, yield_name, when):
+        # Variant of _make_table that lets the caller pick the record's
+        # _time. Used by the multi-series regression tests below.
+        record = MagicMock()
+        record.get_value.return_value = value
+        record.get_time.return_value = when
+        record.values = {"result": yield_name}
+        table = MagicMock()
+        table.records = [record]
+        table.get_group_key.return_value = {"result": yield_name}
+        return table
+
+    def test_query_groups_before_yields(self, monkeypatch):
+        # Regression guard for the multi-host bug: if a device reports
+        # under several `host` tag values over the QUERY_RANGE window,
+        # InfluxDB returns one table per series unless the pipeline
+        # explicitly collapses them. |> group() is what guarantees a
+        # single global last()/min()/max(). Removing it silently
+        # re-introduces the non-deterministic "whichever series the
+        # client iterated last wins" bug.
+        mod = _import_fresh()
+        api = MagicMock()
+        api.query.return_value = [self._make_table(22.5, "last")]
+        client = MagicMock()
+        client.query_api.return_value = api
+        monkeypatch.setattr(mod, "InfluxDBClient", lambda **kw: client)
+
+        mod.fetch_temperature()
+        query = api.query.call_args[0][0]
+        assert "|> group()" in query
+        # And it must precede the yields, otherwise the per-series
+        # grouping is already baked into the selectors above.
+        group_pos = query.index("|> group()")
+        first_yield_pos = query.index('yield(name: "last")')
+        assert group_pos < first_yield_pos
+
+    def test_multiple_last_tables_picks_newest_by_time(self, monkeypatch):
+        # Defense in depth for the multi-host bug. Even if |> group()
+        # is removed in a future refactor or a new tag dimension
+        # silently splits the series, the Python loop should publish
+        # the record with the newest _time, not whichever table the
+        # client returned last. Three "last" tables, three different
+        # timestamps, presented in non-monotonic order.
+        older = datetime(2026, 4, 25, tzinfo=timezone.utc)
+        middle = datetime(2026, 5, 5, tzinfo=timezone.utc)
+        newest = datetime(2026, 5, 9, tzinfo=timezone.utc)
+        tables = [
+            self._make_table_at(22.4, "last", older),
+            self._make_table_at(7.6, "last", newest),
+            self._make_table_at(7.0, "last", middle),
+        ]
+        mod = self._wire(monkeypatch, tables)
+        result = mod.fetch_temperature()
+        assert result is not None
+        assert result["temperature"] == 7.6
+        assert result["time"] == newest.isoformat()
+
+    def test_multiple_min_36h_records_picks_smallest(self, monkeypatch):
+        # If grouping is ever lost and several min_36h tables come back
+        # (one per series), publish the smallest across all of them
+        # rather than whichever the client returned last.
+        when = datetime(2026, 5, 9, tzinfo=timezone.utc)
+        tables = [
+            self._make_table_at(22.5, "last", when),
+            self._make_table(8.0, "min_36h"),
+            self._make_table(5.1, "min_36h"),
+            self._make_table(12.3, "min_36h"),
+        ]
+        mod = self._wire(monkeypatch, tables)
+        result = mod.fetch_temperature()
+        assert result is not None
+        assert result["min_36h"] == 5.1
+
+    def test_multiple_max_36h_records_picks_largest(self, monkeypatch):
+        # Mirror of the min test: across multiple max_36h tables, the
+        # published value must be the largest.
+        when = datetime(2026, 5, 9, tzinfo=timezone.utc)
+        tables = [
+            self._make_table_at(22.5, "last", when),
+            self._make_table(18.0, "max_36h"),
+            self._make_table(27.3, "max_36h"),
+            self._make_table(11.2, "max_36h"),
+        ]
+        mod = self._wire(monkeypatch, tables)
+        result = mod.fetch_temperature()
+        assert result is not None
+        assert result["max_36h"] == 27.3
+
+    def test_all_last_records_invalid_returns_none(self, monkeypatch):
+        # If every "last" record fails validation (e.g. NaN across the
+        # board), the function must still abort the publish rather than
+        # falling back to a stale or default value.
+        when = datetime(2026, 5, 9, tzinfo=timezone.utc)
+        tables = [
+            self._make_table_at(float("nan"), "last", when),
+            self._make_table_at(float("inf"), "last", when),
+        ]
+        mod = self._wire(monkeypatch, tables)
+        assert mod.fetch_temperature() is None
+
+    def test_mixed_valid_and_invalid_last_records_picks_valid_newest(self, monkeypatch):
+        # One invalid record (NaN) at the newest timestamp must not
+        # poison the publish: the next-newest valid record should win,
+        # rather than the function aborting on the first bad row.
+        older = datetime(2026, 5, 5, tzinfo=timezone.utc)
+        newer = datetime(2026, 5, 9, tzinfo=timezone.utc)
+        tables = [
+            self._make_table_at(float("nan"), "last", newer),
+            self._make_table_at(7.0, "last", older),
+        ]
+        mod = self._wire(monkeypatch, tables)
+        result = mod.fetch_temperature()
+        assert result is not None
+        assert result["temperature"] == 7.0
+        assert result["time"] == older.isoformat()
+
 
 # ---------------------------------------------------------------------------
 # T-023: Pretty-print sensor name
