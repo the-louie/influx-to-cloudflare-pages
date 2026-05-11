@@ -17,13 +17,14 @@ Fetch a temperature data point from InfluxDB (backing a Grafana dashboard) and p
 - Query fetches the last (most recent) value
 
 ## Flux Query
-The snippet below is illustrative pseudocode showing the query shape, not the literal source. The real query lives in `fetch_temperature()` in `publish_temperature.py` and uses validated f-string interpolation plus a multi-yield form that also computes 36h min/max in the same round trip.
+The snippet below is illustrative pseudocode showing the query shape, not the literal source. The real query lives in `fetch_temperature()` in `publish_temperature.py` and uses validated f-string interpolation plus a multi-yield form that also computes 36h min/max in the same round trip. `|> group()` is load-bearing: without it, `last()`/`min()`/`max()` operate per-series (one table per unique tag combination, e.g. per `host`) and return ambiguous "latest" rows that the Python loop cannot principally rank.
 ```flux
 from(bucket: "home_assistant")
   |> range(start: -30d)
   |> filter(fn: (r) => r["_measurement"] == params.measurement)
   |> filter(fn: (r) => r["_field"] == params.field)
   |> filter(fn: (r) => r["device_id"] == params.device_id)
+  |> group()
   |> last()
 ```
 
